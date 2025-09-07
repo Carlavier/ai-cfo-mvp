@@ -16,7 +16,7 @@ import random
 
 # Configure page
 st.set_page_config(
-    page_title="AI CFO - Financial Intelligence", 
+    page_title="AI CFO - Financial Intelligence",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="expanded"

@@ -1,0 +1,44 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+.env/
+.venv/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Logs and temp
+*.log
+*.pot
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.tmp
+*.temp
+
+# IDEs / editors
+.vscode/
+.idea/
+*.iml
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+.nox/
+
+# Environment variables / secrets
+.env
+*.env
+secrets.json
+config.json
+.streamlit/secrets.toml

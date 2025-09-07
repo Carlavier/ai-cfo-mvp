@@ -4,12 +4,13 @@ import requests
 import json
 import os
 from datetime import datetime
+import streamlit as st
 
 class DeepSeekAPITester:
     def __init__(self, api_key=None):
         # DeepSeek API credentials
         # Get your API key from: https://platform.deepseek.com/
-        self.api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
+        self.api_key = api_key or st.secrets["deepseek"]["api_key"]
         self.base_url = "https://api.deepseek.com/v1/chat/completions"
         self.model = "deepseek-chat"
         
@@ -225,7 +226,7 @@ def main():
     print("=" * 40)
     
     # Check if API key is available
-    api_key = os.getenv('DEEPSEEK_API_KEY')
+    api_key = st.secrets["deepseek"]["api_key"]
     
     if not api_key or api_key == "your_deepseek_key_here":
         setup_environment()
