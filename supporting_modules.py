@@ -5,6 +5,7 @@ import pandas as pd
 from typing import Optional, Dict
 from database_module import DatabaseManager
 from dotenv import load_dotenv
+import streamlit as st
 load_dotenv()
 
 class AuthSystem:
@@ -47,9 +48,9 @@ from typing import List, Dict
 
 class PlaidClient:
     def __init__(self):
-        self.client_id = os.getenv('PLAID_CLIENT_ID')
-        self.secret = os.getenv('PLAID_SECRET')
-        self.env = os.getenv('PLAID_ENV', 'sandbox')
+        self.client_id = os.getenv('PLAID_CLIENT_ID') or st.secrets["PLAID_CLIENT_ID"]
+        self.secret = os.getenv('PLAID_SECRET') or st.secrets["PLAID_SECRET"]
+        self.env = os.getenv('PLAID_ENV', 'sandbox').capitalize() or str(st.secrets["PLAID_ENV"] or "sandbox").capitalize()
         self.connected = bool(self.client_id and self.secret)
     
     def is_connected(self) -> bool:
@@ -57,8 +58,8 @@ class PlaidClient:
 
 class QuickBooksClient:
     def __init__(self):
-        self.client_id = os.getenv('QB_CLIENT_ID')
-        self.client_secret = os.getenv('QB_CLIENT_SECRET')
+        self.client_id = os.getenv('QB_CLIENT_ID') or st.secrets["QB_CLIENT_ID"]
+        self.client_secret = os.getenv('QB_CLIENT_SECRET') or st.secrets["QB_CLIENT_SECRET"]
         self.connected = bool(self.client_id and self.client_secret)
     
     def is_connected(self) -> bool:
@@ -66,7 +67,7 @@ class QuickBooksClient:
 
 class DeepSeekClient:
     def __init__(self):
-        self.api_key = os.getenv('DEEPSEEK_API_KEY')
+        self.api_key = os.getenv('DEEPSEEK_API_KEY') or st.secrets["DEEPSEEK_API_KEY"]
         self.base_url = "https://api.deepseek.com/v1/chat/completions"
         self.model = "deepseek-chat"
     

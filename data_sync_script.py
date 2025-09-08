@@ -6,6 +6,7 @@ from typing import List, Dict
 from database_module import DatabaseManager
 from dotenv import load_dotenv
 import pandas as pd
+import streamlit as st
 
 # Load environment early so other modules in this file see vars
 load_dotenv(override=True)
@@ -43,10 +44,10 @@ class DataSyncManager:
             self.plaid_client = None
             return
 
-        client_id = os.getenv("PLAID_CLIENT_ID")
-        secret = os.getenv("PLAID_SECRET")
+        client_id = os.getenv("PLAID_CLIENT_ID") or st.secrets["PLAID_CLIENT_ID"]
+        secret = os.getenv("PLAID_SECRET") or st.secrets["PLAID_SECRET"]
         # Normalize env and map to correct constants
-        env_name = os.getenv("PLAID_ENV", "sandbox").lower()
+        env_name = os.getenv("PLAID_ENV", "sandbox").capitalize() or str(st.secrets["PLAID_ENV"] or "sandbox").capitalize()
 
         if not client_id or not secret:
             print("⚠️ Plaid credentials not found. Set PLAID_CLIENT_ID and PLAID_SECRET")
@@ -83,14 +84,14 @@ class DataSyncManager:
             self.qb_client = None
             return
 
-        client_id = os.getenv("QB_CLIENT_ID")
-        secret = os.getenv("QB_CLIENT_SECRET")
-        base_url = os.getenv("APP_BASE_URL")
-        qb_redirect_uri = os.getenv("QB_CLIENT_REDIRECT_URL")
+        client_id = os.getenv("QB_CLIENT_ID") or st.secrets["QB_CLIENT_ID"]
+        secret = os.getenv("QB_CLIENT_SECRET") or st.secrets["QB_CLIENT_SECRET"]
+        base_url = os.getenv("APP_BASE_URL") or st.secrets["APP_BASE_URL"]
+        qb_redirect_uri = os.getenv("QB_CLIENT_REDIRECT_URL") or st.secrets["QB_CLIENT_REDIRECT_URL"]
 
         if not qb_redirect_uri:
             base = (base_url or "http://localhost:8501").rstrip("/")
-            qb_redirect_uri = os.getenv("APP_REDIRECT_URI", f"{base}/")
+            qb_redirect_uri = os.getenv("APP_REDIRECT_URI", f"{base}/") or st.secrets.get("APP_REDIRECT_URI", f"{base}/")
 
         if not client_id or not secret:
             print("⚠️ QuickBooks credentials not found. Set QB_CLIENT_ID and QB_CLIENT_SECRET")
@@ -257,8 +258,8 @@ def sync_quickbooks_data(company_id: int):
         # Create QB client
         qb_client = QuickBooks(
             sandbox=True,
-            consumer_key=os.getenv('QB_CLIENT_ID'),
-            consumer_secret=os.getenv('QB_CLIENT_SECRET'),
+            consumer_key=os.getenv('QB_CLIENT_ID') or st.secrets["QB_CLIENT_ID"],
+            consumer_secret=os.getenv('QB_CLIENT_SECRET') or st.secrets["QB_CLIENT_SECRET"],
             access_token=qb_tokens['access_token'],
             access_token_secret='',
             company_id=qb_tokens['realm_id']
@@ -401,7 +402,7 @@ def setup_company_integrations():
     
     # Setup Plaid
     print("\n1. Plaid Integration:")
-    if PLAID_AVAILABLE and os.getenv('PLAID_CLIENT_ID'):
+    if PLAID_AVAILABLE and (os.getenv('PLAID_CLIENT_ID') or st.secrets.get("PLAID_CLIENT_ID")):
         setup_plaid = input("Setup Plaid? (y/n): ").lower() == 'y'
         if setup_plaid:
             # In a real app, you'd do the OAuth flow here
@@ -412,7 +413,7 @@ def setup_company_integrations():
     
     # Setup QuickBooks
     print("\n2. QuickBooks Integration:")
-    if QB_AVAILABLE and os.getenv('QB_CLIENT_ID'):
+    if QB_AVAILABLE and (os.getenv('QB_CLIENT_ID') or st.secrets.get("QB_CLIENT_ID")):
         setup_qb = input("Setup QuickBooks? (y/n): ").lower() == 'y'
         if setup_qb:
             # In a real app, you'd do the OAuth flow here
