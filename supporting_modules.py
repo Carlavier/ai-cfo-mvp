@@ -1,8 +1,11 @@
 # auth.py - Authentication System
+import os
 import hashlib
 import pandas as pd
 from typing import Optional, Dict
 from database_module import DatabaseManager
+from dotenv import load_dotenv
+load_dotenv()
 
 class AuthSystem:
     def __init__(self, db: DatabaseManager):
@@ -69,7 +72,7 @@ class DeepSeekClient:
     
     def analyze_financial_data(self, query: str, context_data: Dict) -> str:
         """Analyze financial data with AI"""
-        if not self.api_key or self.api_key == 'demo_key':
+        if not self.api_key or self.api_key == 'push_your_key_here':
             return self.fallback_analysis(query, context_data)
         
         try:
