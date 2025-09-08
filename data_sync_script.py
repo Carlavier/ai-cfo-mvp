@@ -1,9 +1,13 @@
 # data_sync.py - API Data Sync Script
 import os
+import pandas as pd
 import requests
 from datetime import datetime, timedelta
 from typing import List, Dict
 from database_module import DatabaseManager
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Try to import real API clients
 try:
@@ -40,8 +44,8 @@ class DataSyncManager:
         
         client_id = os.getenv('PLAID_CLIENT_ID')
         secret = os.getenv('PLAID_SECRET')
-        env = os.getenv('PLAID_ENV', 'sandbox')
-        
+        env = os.getenv('PLAID_ENV', 'sandbox').capitalize()
+
         if not client_id or not secret:
             print("⚠️ Plaid credentials not found. Set PLAID_CLIENT_ID and PLAID_SECRET")
             self.plaid_client = None
@@ -78,7 +82,8 @@ class DataSyncManager:
             self.auth_client = AuthClient(
                 client_id=client_id,
                 client_secret=secret,
-                environment='sandbox'
+                environment='sandbox',
+                redirect_uri='http://localhost:8501/callback'
             )
             print("✅ QuickBooks client initialized")
         except Exception as e:
@@ -312,17 +317,129 @@ def sync_qb_bills(sync_manager, company_id: int, qb_client) -> int:
     
     return bills_synced
 
+# def get_company_plaid_token(company_id: int) -> str:
+#     """Get stored Plaid access token for company"""
+#     # In a real app, you'd store these in the database
+#     # For demo, return None (will use mock data)
+#     return None
+
+# def get_company_qb_tokens(company_id: int) -> Dict:
+#     """Get stored Plaid access token for company"""
+#     # In a real app, you'd store these in the database
+#     # For demo, return None (will use mock data)
+#     return None
+
+def get_company_public_token(company_id: int) -> str:
+    """Demo: Return a mock Plaid public_token for the given company_id.
+    Prefer stored DB value (if Link flow was used); otherwise return demo token."""
+    # Try DB first
+    db = DatabaseManager()
+    rec = db.get_plaid_token_record(company_id)
+    if rec and rec.get('public_token'):
+        return rec.get('public_token')
+    
+    # Demo/testing fallback tokens
+    demo_tokens = {
+        1: "public-sandbox-token-1",
+        2: "public-sandbox-token-2",
+        3: "public-sandbox-token-3"
+    }
+    return demo_tokens.get(company_id)
+
+def create_link_token(company_id: int) -> str:
+    """Create a Plaid link token for frontend Link initialization (requires PLAID_AVAILABLE)."""
+    if not PLAID_AVAILABLE:
+        print("⚠️ Plaid SDK not installed, cannot create link token.")
+        return None
+    try:
+        from plaid.model.link_token_create_request import LinkTokenCreateRequest
+        from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
+        # use environment from .env
+        client_id = os.getenv('PLAID_CLIENT_ID')
+        secret = os.getenv('PLAID_SECRET')
+        env = os.getenv('PLAID_ENV', 'sandbox').capitalize()
+        configuration = Configuration(
+            host=getattr(plaid.Environment, env),
+            api_key={'clientId': client_id, 'secret': secret}
+        )
+        api_client = ApiClient(configuration)
+        client = plaid_api.PlaidApi(api_client)
+        request = LinkTokenCreateRequest(
+            user=LinkTokenCreateRequestUser(client_user_id=str(company_id)),
+            client_name="AI CFO Demo",
+            products=["transactions", "auth"],
+            country_codes=["US"],
+            language="en"
+        )
+        response = client.link_token_create(request)
+        # response has attribute link_token
+        link_token = getattr(response, 'link_token', None) or response['link_token']
+        return link_token
+    except Exception as e:
+        print(f"❌ Link token creation failed: {e}")
+        return None
+
+def exchange_public_token(public_token: str, company_id: int) -> str:
+    """Exchange a Plaid public_token for an access_token and persist it in DB.
+    Returns the access_token or None on failure."""
+    if not PLAID_AVAILABLE:
+        print("⚠️ Plaid SDK not installed, cannot exchange public token.")
+        return None
+    try:
+        from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
+        client_id = os.getenv('PLAID_CLIENT_ID')
+        secret = os.getenv('PLAID_SECRET')
+        env = os.getenv('PLAID_ENV', 'sandbox').capitalize()
+        configuration = Configuration(
+            host=getattr(plaid.Environment, env),
+            api_key={'clientId': client_id, 'secret': secret}
+        )
+        api_client = ApiClient(configuration)
+        client = plaid_api.PlaidApi(api_client)
+        request = ItemPublicTokenExchangeRequest(public_token=public_token)
+        response = client.item_public_token_exchange(request)
+        access_token = getattr(response, 'access_token', None) or response['access_token']
+        item_id = getattr(response, 'item_id', None) or response.get('item_id')
+        # persist to DB
+        db = DatabaseManager()
+        db.save_plaid_token(company_id, public_token=public_token, access_token=access_token, item_id=item_id)
+        return access_token
+    except Exception as e:
+        print(f"❌ Plaid token exchange failed: {e}")
+        return None
+
 def get_company_plaid_token(company_id: int) -> str:
-    """Get stored Plaid access token for company"""
-    # In a real app, you'd store these in the database
-    # For demo, return None (will use mock data)
-    return None
+    """Return a valid Plaid access_token for company.
+    Flow:
+      1) Try DB stored access_token
+      2) If missing and a public_token exists (DB/demo), try exchange_public_token()
+      3) Fallback to deterministic demo mock token when Plaid SDK not used
+    """
+    db = DatabaseManager()
+    rec = db.get_plaid_token_record(company_id)
+    if rec and rec.get('access_token'):
+        return rec.get('access_token')
+    # If public_token exists (DB or demo), try exchanging with Plaid to get real access_token
+    public_token = get_company_public_token(company_id)
+    if public_token and PLAID_AVAILABLE:
+        access_token = exchange_public_token(public_token, company_id)
+        if access_token:
+            return access_token
+    # Fallback demo deterministic token (not valid with real Plaid, only for app demo paths)
+    import uuid, hashlib
+    identifier = hashlib.sha256(public_token.encode() if public_token else f"demo-{company_id}".encode()).hexdigest()[:24]
+    return f"access-sandbox-{identifier}"
 
 def get_company_qb_tokens(company_id: int) -> Dict:
-    """Get stored QuickBooks tokens for company"""
-    # In a real app, you'd store these in the database
-    # For demo, return None (will use mock data)
-    return None
+    """Get stored QuickBooks tokens for company (demo mock)"""
+    # In a real app, you'd fetch these from the database and handle refresh tokens.
+    # Demo values below let the QuickBooks sync path run without real OAuth.
+    return {
+        "access_token": f"mock-qb-access-token-{company_id}",
+        "refresh_token": f"mock-qb-refresh-token-{company_id}",
+        "realm_id": str(1000 + company_id),      # demo company realm id
+        "expires_at": (datetime.now() + timedelta(hours=1)).isoformat()
+    }
 
 def setup_company_integrations():
     """Interactive setup for company integrations"""

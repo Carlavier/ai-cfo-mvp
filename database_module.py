@@ -4,6 +4,9 @@ import pandas as pd
 from datetime import datetime, timedelta
 import hashlib
 from typing import List, Dict, Optional
+import os
+from plaid.model.sandbox_public_token_create_request import SandboxPublicTokenCreateRequest
+from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
 
 class DatabaseManager:
     def __init__(self, db_path="ai_cfo.db"):
@@ -129,6 +132,19 @@ class DatabaseManager:
                 error_message TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (company_id) REFERENCES companies (id)
+            )
+        ''')
+        
+        # Plaid tokens (store public_token, access_token, item_id)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS plaid_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id INTEGER UNIQUE,
+                public_token TEXT,
+                access_token TEXT,
+                item_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -432,7 +448,115 @@ class DatabaseManager:
         """
         result = pd.read_sql_query(query, conn, params=(company_id, plaid_account_id))
         conn.close()
-        
+
+        if len(result) > 0:
+            return result.iloc[0].to_dict()
+        return None
+
+    def save_plaid_token(self, company_id: int, public_token: str = None,
+                         access_token: str = None, item_id: str = None):
+        """Insert or update Plaid tokens for a company"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO plaid_tokens (company_id, public_token, access_token, item_id, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(company_id) DO UPDATE SET
+                public_token=excluded.public_token,
+                access_token=excluded.access_token,
+                item_id=excluded.item_id,
+                updated_at=datetime('now')
+        ''', (company_id, public_token, access_token, item_id))
+        conn.commit()
+        conn.close()
+
+    def exchange_public_token(self, public_token: str, company_id: int) -> Optional[str]:
+        """Exchange a Plaid public_token for an access_token and persist it in DB.
+        If a demo public_token is provided (e.g. 'public-sandbox-token-1'), create a real
+        sandbox public_token via Plaid sandbox endpoint and exchange that instead.
+        Returns the access_token or None on failure."""
+        try:
+            try:
+                # Plaid SDK v8+ style imports
+                from plaid import Configuration, ApiClient, environment as plaid_environment  # type: ignore
+                from plaid.api import plaid_api  # type: ignore
+                PLAID_SDK_AVAILABLE = True
+                plaid_mod = __import__('plaid')
+            except Exception:
+                # older or missing plaid SDK
+                PLAID_SDK_AVAILABLE = False
+
+            if not PLAID_SDK_AVAILABLE:
+                print("⚠️ Plaid SDK not installed, cannot exchange public token.")
+                return None
+
+            client_id = os.getenv('PLAID_CLIENT_ID')
+            secret = os.getenv('PLAID_SECRET')
+            env = os.getenv('PLAID_ENV', 'sandbox').capitalize()
+
+            # Build configuration and client
+            # Use getattr on plaid.Environment if available, otherwise try environment module
+            try:
+                env_const = getattr(plaid_mod, 'Environment', None)
+                if env_const is not None:
+                    host = getattr(env_const, env)
+                else:
+                    host = getattr(plaid_environment, env)
+            except Exception:
+                host = getattr(plaid_environment, env)
+
+            configuration = Configuration(
+                host=host,
+                api_key={'clientId': client_id, 'secret': secret}
+            )
+            api_client = ApiClient(configuration)
+            client = plaid_api.PlaidApi(api_client)
+
+            # If caller passed a demo public_token, create a valid sandbox public_token
+            if public_token and public_token.startswith("public-sandbox-token"):
+                if env.lower() != "sandbox":
+                    print("⚠️ Demo public_token used but PLAID_ENV is not sandbox.")
+                    return None
+
+                try:
+                    sandbox_req = SandboxPublicTokenCreateRequest(
+                        institution_id="ins_109508",
+                        initial_products=["transactions", "auth"],
+                        options={"override_username": "user_good", "override_password": "pass_good"}
+                    )
+                    sandbox_resp = client.sandbox_public_token_create(sandbox_req)
+                    real_public_token = getattr(sandbox_resp, "public_token", None) or sandbox_resp.get("public_token")
+                    if not real_public_token:
+                        print("❌ Failed to create sandbox public_token")
+                        return None
+                    public_token_to_exchange = real_public_token
+                    print("ℹ️ Created real sandbox public_token")
+                except Exception as se:
+                    print(f"❌ Failed to create sandbox public_token: {se}")
+                    return None
+            else:
+                public_token_to_exchange = public_token
+
+            # Exchange public_token for access_token
+            request = ItemPublicTokenExchangeRequest(public_token=public_token_to_exchange)
+            response = client.item_public_token_exchange(request)
+            access_token = getattr(response, 'access_token', None) or (response.get('access_token') if hasattr(response, 'get') else None)
+            item_id = getattr(response, 'item_id', None) or (response.get('item_id') if hasattr(response, 'get') else None)
+
+            # persist to DB via class method
+            self.save_plaid_token(company_id, public_token=public_token_to_exchange, access_token=access_token, item_id=item_id)
+            return access_token
+
+        except Exception as e:
+            print(f"❌ Plaid token exchange failed: {e}")
+            return None
+
+    def get_plaid_token_record(self, company_id: int) -> Optional[Dict]:
+        """Return stored Plaid token record for company (public + access)"""
+        conn = self.get_connection()
+        query = "SELECT public_token, access_token, item_id FROM plaid_tokens WHERE company_id = ?"
+        result = pd.read_sql_query(query, conn, params=(company_id,))
+        conn.close()
         if len(result) > 0:
             return result.iloc[0].to_dict()
         return None

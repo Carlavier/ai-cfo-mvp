@@ -3,6 +3,9 @@ import hashlib
 import pandas as pd
 from typing import Optional, Dict
 from database_module import DatabaseManager
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class AuthSystem:
     def __init__(self, db: DatabaseManager):
