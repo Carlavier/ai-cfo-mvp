@@ -40,7 +40,7 @@ class DataSyncManager:
         
         client_id = os.getenv('PLAID_CLIENT_ID')
         secret = os.getenv('PLAID_SECRET')
-        env = os.getenv('PLAID_ENV', 'sandbox')
+        env = os.getenv('PLAID_ENV', 'Sandbox')
         
         if not client_id or not secret:
             print("⚠️ Plaid credentials not found. Set PLAID_CLIENT_ID and PLAID_SECRET")
@@ -68,18 +68,26 @@ class DataSyncManager:
         
         client_id = os.getenv('QB_CLIENT_ID')
         secret = os.getenv('QB_CLIENT_SECRET')
+        base_url = os.getenv('APP_BASE_URL')
+        qb_redirect_uri= os.getenv('QB_CLIENT_REDIRECT_URL')
+        
+        if not qb_redirect_uri: 
+            base = (base_url or 'http://localhost:8501').rstrip('/')
+            qb_redirect_uri = os.getenv('APP_REDIRECT_URI', f"{base}/")
         
         if not client_id or not secret:
             print("⚠️ QuickBooks credentials not found. Set QB_CLIENT_ID and QB_CLIENT_SECRET")
             self.qb_client = None
             return
-        
+            
         try:
             self.auth_client = AuthClient(
                 client_id=client_id,
                 client_secret=secret,
-                environment='sandbox'
+                environment='Sandbox',
+                redirect_uri=qb_redirect_uri
             )
+            
             print("✅ QuickBooks client initialized")
         except Exception as e:
             print(f"❌ QuickBooks setup failed: {e}")
