@@ -162,6 +162,58 @@ Please ask specific questions like:
 
 I'll provide detailed analysis based on your actual financial data."""
 
+    # Backward-compatible enhanced method that accepts conversation history
+    def analyze_financial_data_with_conversation(self, query: str, context_data: Dict, conversation: List[Dict] = None) -> str:
+        """Analyze financial data with AI. Accepts conversation history (list of {"role","content"})."""
+        if not self.api_key or self.api_key == 'push_your_key_here':
+            return self.fallback_analysis(query, context_data)
+
+        try:
+            headers = {
+                'Authorization': f'Bearer {self.api_key}',
+                'Content-Type': 'application/json'
+            }
+
+            # Build messages: system -> previous conversation -> new user prompt with context
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are an expert AI CFO. Provide specific, actionable financial insights."
+                }
+            ]
+
+            # Include prior chat history if provided (avoid None)
+            if conversation:
+                for m in conversation:
+                    # Ensure roles are valid: assistant/user
+                    role = m.get("role", "user")
+                    content = m.get("content", "")
+                    messages.append({"role": role, "content": content})
+
+            # Append current user request (with context)
+            messages.append({
+                "role": "user",
+                "content": f"Financial data: {context_data}\n\nQuestion: {query}"
+            })
+
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": 0.3,
+                "max_tokens": 800
+            }
+
+            response = requests.post(self.base_url, headers=headers, json=payload, timeout=30)
+
+            if response.status_code == 200:
+                result = response.json()
+                return result['choices'][0]['message']['content']
+            else:
+                return self.fallback_analysis(query, context_data)
+
+        except Exception:
+            return self.fallback_analysis(query, context_data)
+
 # agents.py - AI Agents
 from datetime import datetime, timedelta
 from typing import List, Dict
@@ -296,3 +348,26 @@ class CashFlowAgent:
             user_question = "Provide a financial health assessment and key recommendations"
         
         return self.ai.analyze_financial_data(user_question, financial_data)
+
+    # Backward-compatible enhanced agent method that accepts conversation history
+    def get_ai_insights_with_conversation(self, company_id: int, company_name: str,
+                       user_question: str = None, conversation: List[Dict] = None) -> str:
+        """Get AI-powered financial insights. Pass conversation history to AI client."""
+        # Get comprehensive financial data
+        financial_data = self.get_financial_summary(company_id)
+        financial_data['company_name'] = company_name
+
+        if not user_question:
+            user_question = "Provide a financial health assessment and key recommendations"
+
+        # Prefer AI client's new conversation-capable method if available, otherwise fall back
+        if hasattr(self.ai, "analyze_financial_data_with_conversation"):
+            return self.ai.analyze_financial_data_with_conversation(user_question, financial_data, conversation=conversation)
+        else:
+            # Maintain backward compatibility by embedding conversation into the prompt
+            if conversation:
+                convo_text = "\n\nPrevious conversation:\n" + "\n".join(f"{m.get('role','user')}: {m.get('content','')}" for m in conversation)
+            else:
+                convo_text = ""
+            combined_question = f"{convo_text}\n\n{user_question}"
+            return self.ai.analyze_financial_data(combined_question, financial_data)
