@@ -41,5 +41,6 @@ htmlcov/
 *.env
 secrets.json
 config.json
-.streamlit/secrets.toml
+.streamlit
+.streamlit/*
 *.sh
