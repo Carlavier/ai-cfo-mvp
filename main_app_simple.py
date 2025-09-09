@@ -4,6 +4,9 @@ import pandas as pd
 from datetime import datetime, timedelta
 import plotly.express as px
 import plotly.graph_objects as go
+import requests
+from requests.auth import HTTPBasicAuth
+import os
 
 from database_module import DatabaseManager
 from supporting_modules import CashFlowAgent, PlaidClient, QuickBooksClient, DeepSeekClient, AuthSystem
@@ -191,7 +194,7 @@ def show_banking_page(user, agent):
             if st.button("🔄 Sync Data"):
                 sync_data(user['company_id'])
                 st.success("Data synced!")
-                st.rerun()
+                # st.rerun()
 
     # Account balances
     accounts = st.session_state.db.get_accounts(user['company_id'])
@@ -458,6 +461,45 @@ def sync_data(company_id):
     except Exception as e:
         st.warning(f"⚠️ Accounting sync failed: {e}")
 
+def quickbooks_auth_handler():
+    query_params = st.query_params
+    auth_code = query_params["code"] if "code" in query_params else None
+    realm_id = query_params["realmId"] if "realmId" in query_params else None
+    print(auth_code, realm_id)
+
+    if auth_code and realm_id:
+        # Đổi code sang token
+        CLIENT_ID = st.secrets["QB_CLIENT_ID"]
+        CLIENT_SECRET = st.secrets["QB_CLIENT_SECRET"]
+        REDIRECT_URI = st.secrets["QB_CLIENT_REDIRECT_URL"]
+
+        token_url = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
+        resp = requests.post(
+            token_url,
+            data={
+                "grant_type": "authorization_code",
+                "code": auth_code,
+                "redirect_uri": REDIRECT_URI,
+            },
+            auth=HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+
+        if resp.status_code == 200:
+            tokens = resp.json()
+            st.session_state["access_token"] = tokens["access_token"]
+            st.session_state["refresh_token"] = tokens["refresh_token"]
+            st.session_state["realm_id"] = realm_id
+
+            # Xóa query params để không bị rerun về login nữa
+            st.query_params.clear()
+        else:
+            st.error(f"Token exchange failed: {resp.text}")
+            st.stop()
+
 
 def main():
     init_session_state()
@@ -465,6 +507,7 @@ def main():
     if 'user' not in st.session_state:
         show_login()
     else:
+        quickbooks_auth_handler()
         show_dashboard(st.session_state.user)
 
 
