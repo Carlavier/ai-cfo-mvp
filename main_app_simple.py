@@ -6,31 +6,35 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from database_module import DatabaseManager
-from supporting_modules import CashFlowAgent, PlaidClient, QuickBooksClient, DeepSeekClient, AuthSystem
+from supporting_modules import (
+    CashFlowAgent,
+    PlaidClient,
+    QuickBooksClient,
+    DeepSeekClient,
+    AuthSystem,
+)
 
 # Configure page
 st.set_page_config(
-    page_title="AI CFO - Financial Intelligence",
-    page_icon="💰",
-    layout="wide"
+    page_title="AI CFO - Financial Intelligence", page_icon="💰", layout="wide"
 )
 
 
 def init_session_state():
     """Initialize session state objects"""
-    if 'db' not in st.session_state:
+    if "db" not in st.session_state:
         st.session_state.db = DatabaseManager()
 
-    if 'auth' not in st.session_state:
+    if "auth" not in st.session_state:
         st.session_state.auth = AuthSystem(st.session_state.db)
 
-    if 'plaid' not in st.session_state:
+    if "plaid" not in st.session_state:
         st.session_state.plaid = PlaidClient()
 
-    if 'qb' not in st.session_state:
+    if "qb" not in st.session_state:
         st.session_state.qb = QuickBooksClient()
 
-    if 'ai' not in st.session_state:
+    if "ai" not in st.session_state:
         st.session_state.ai = DeepSeekClient()
 
 
@@ -42,7 +46,8 @@ def show_login():
     with col2:
         username = st.text_input("Username", placeholder="Enter username")
         password = st.text_input(
-            "Password", type="password", placeholder="Enter password")
+            "Password", type="password", placeholder="Enter password"
+        )
 
         if st.button("Login", type="primary", use_container_width=True):
             user = st.session_state.auth.authenticate(username, password)
@@ -59,7 +64,8 @@ def show_login():
         demo_accounts = st.session_state.db.get_demo_accounts()
         for account in demo_accounts:
             st.code(
-                f"{account['username']} / {account['password']} - {account['role']} @ {account['company_name']}")
+                f"{account['username']} / {account['password']} - {account['role']} @ {account['company_name']}"
+            )
 
 
 def show_dashboard(user):
@@ -71,7 +77,7 @@ def show_dashboard(user):
         st.caption(f"{user['industry']} • {user['employee_count']} employees")
 
     with col2:
-        st.metric("Your Role", user['role'])
+        st.metric("Your Role", user["role"])
 
     with col3:
         if st.button("🚪 Logout"):
@@ -82,10 +88,16 @@ def show_dashboard(user):
     st.sidebar.title(f"🏢 {user['company_name']}")
 
     # Role-based pages
-    if user['role'] in ['CEO', 'CFO']:
-        pages = ["Executive Dashboard", "Banking", "Cash Flow",
-                 "AR Management", "AP Management", "AI Chat"]
-    elif user['role'] == 'Accountant':
+    if user["role"] in ["CEO", "CFO"]:
+        pages = [
+            "Executive Dashboard",
+            "Banking",
+            "Cash Flow",
+            "AR Management",
+            "AP Management",
+            "AI Chat",
+        ]
+    elif user["role"] == "Accountant":
         pages = ["Banking", "Transactions", "AR Management", "AP Management"]
     else:
         pages = ["Banking", "Transactions"]
@@ -93,8 +105,12 @@ def show_dashboard(user):
     page = st.sidebar.selectbox("Navigation", pages)
 
     # Initialize agent
-    agent = CashFlowAgent(st.session_state.db, st.session_state.plaid,
-                          st.session_state.qb, st.session_state.ai)
+    agent = CashFlowAgent(
+        st.session_state.db,
+        st.session_state.plaid,
+        st.session_state.qb,
+        st.session_state.ai,
+    )
 
     # Route to pages
     if page == "Executive Dashboard":
@@ -118,7 +134,7 @@ def show_executive_dashboard(user, agent):
     st.header("📊 Executive Dashboard")
 
     # Get financial data
-    financial_data = agent.get_financial_summary(user['company_id'])
+    financial_data = agent.get_financial_summary(user["company_id"])
 
     # Key metrics
     col1, col2, col3, col4 = st.columns(4)
@@ -130,8 +146,7 @@ def show_executive_dashboard(user, agent):
         st.metric("🏃‍♂️ Cash Runway", f"{financial_data['runway_days']} days")
 
     with col3:
-        st.metric("📄 Outstanding AR",
-                  f"${financial_data['outstanding_ar']:,.0f}")
+        st.metric("📄 Outstanding AR", f"${financial_data['outstanding_ar']:,.0f}")
 
     with col4:
         st.metric("💳 Upcoming AP", f"${financial_data['upcoming_ap']:,.0f}")
@@ -141,28 +156,27 @@ def show_executive_dashboard(user, agent):
 
     with col1:
         st.subheader("💸 Cash Flow Trend")
-        cash_flow_data = agent.get_cash_flow_chart_data(user['company_id'])
+        cash_flow_data = agent.get_cash_flow_chart_data(user["company_id"])
         if cash_flow_data:
             df = pd.DataFrame(cash_flow_data)
-            fig = px.line(df, x='date', y='balance',
-                          title='Cash Balance Over Time')
+            fig = px.line(df, x="date", y="balance", title="Cash Balance Over Time")
             st.plotly_chart(fig, use_container_width=True)
 
     with col2:
         st.subheader("🎯 Expense Breakdown")
-        expense_data = agent.get_expense_breakdown(user['company_id'])
+        expense_data = agent.get_expense_breakdown(user["company_id"])
         if expense_data:
             df = pd.DataFrame(expense_data)
-            fig = px.pie(df, values='amount', names='category',
-                         title='Expense Categories')
+            fig = px.pie(
+                df, values="amount", names="category", title="Expense Categories"
+            )
             st.plotly_chart(fig, use_container_width=True)
 
     # AI Insights
     st.subheader("🤖 AI Insights")
     if st.button("Get AI Analysis"):
         with st.spinner("Analyzing financial data..."):
-            insights = agent.get_ai_insights(
-                user['company_id'], user['company_name'])
+            insights = agent.get_ai_insights(user["company_id"], user["company_name"])
             st.markdown(insights)
 
 
@@ -172,29 +186,29 @@ def show_banking_page(user, agent):
 
     # Data sync status
     with st.expander("🔄 Data Sync Status"):
-        sync_status = st.session_state.db.get_sync_status(user['company_id'])
+        sync_status = st.session_state.db.get_sync_status(user["company_id"])
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            if sync_status['plaid_last_sync']:
+            if sync_status["plaid_last_sync"]:
                 st.success(f"✅ Bank: {sync_status['plaid_last_sync']}")
             else:
                 st.warning("⚠️ Bank: Not connected")
 
         with col2:
-            if sync_status['qb_last_sync']:
+            if sync_status["qb_last_sync"]:
                 st.success(f"✅ Accounting: {sync_status['qb_last_sync']}")
             else:
                 st.warning("⚠️ Accounting: Not connected")
 
         with col3:
             if st.button("🔄 Sync Data"):
-                sync_data(user['company_id'])
+                sync_data(user["company_id"])
                 st.success("Data synced!")
                 st.rerun()
 
     # Account balances
-    accounts = st.session_state.db.get_accounts(user['company_id'])
+    accounts = st.session_state.db.get_accounts(user["company_id"])
 
     if accounts:
         st.subheader("💳 Account Balances")
@@ -218,20 +232,24 @@ def show_banking_page(user, agent):
     # Recent transactions
     st.subheader("🔄 Recent Transactions")
     transactions = st.session_state.db.get_recent_transactions(
-        user['company_id'], limit=10)
+        user["company_id"], limit=10
+    )
 
     if transactions:
         df = pd.DataFrame(transactions)
-        df['amount'] = df['amount'].apply(lambda x: f"${x:,.2f}")
-        st.dataframe(df[['date', 'merchant_name', 'amount', 'category']],
-                     use_container_width=True, hide_index=True)
+        df["amount"] = df["amount"].apply(lambda x: f"${x:,.2f}")
+        st.dataframe(
+            df[["date", "merchant_name", "amount", "category"]],
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
-def show_cash_flow_page(user, agent):
+def show_cash_flow_page(user, agent: CashFlowAgent):
     """Cash flow analysis"""
     st.header("💸 Cash Flow Analysis")
 
-    financial_data = agent.get_financial_summary(user['company_id'])
+    financial_data = agent.get_financial_summary(user["company_id"])
 
     # Metrics
     col1, col2, col3 = st.columns(3)
@@ -242,27 +260,33 @@ def show_cash_flow_page(user, agent):
 
     with col2:
         st.metric("Cash Runway", f"{financial_data['runway_days']} days")
-        st.metric("Monthly Income",
-                  f"${financial_data['monthly_income']:,.0f}")
+        st.metric("Monthly Income", f"${financial_data['monthly_income']:,.0f}")
 
     with col3:
-        net_flow = financial_data['monthly_income'] - \
-            financial_data['monthly_burn']
+        net_flow = financial_data["monthly_income"] - financial_data["monthly_burn"]
         st.metric("Net Cash Flow", f"${net_flow:,.0f}")
 
     # 13-week projection
     st.subheader("📈 13-Week Cash Flow Projection")
-    projection = agent.generate_cash_flow_projection(user['company_id'])
+    projection = agent.generate_cash_flow_projection(user["company_id"])
 
     if projection:
         df = pd.DataFrame(projection)
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df['week'], y=df['projected_cash'],
-                                 mode='lines+markers', name='Projected Cash'))
-        fig.add_hline(y=0, line_dash="dash", line_color="red",
-                      annotation_text="Cash Depletion")
-        fig.update_layout(title="Cash Flow Projection",
-                          xaxis_title="Weeks", yaxis_title="Cash ($)")
+        fig.add_trace(
+            go.Scatter(
+                x=df["week"],
+                y=df["projected_cash"],
+                mode="lines+markers",
+                name="Projected Cash",
+            )
+        )
+        fig.add_hline(
+            y=0, line_dash="dash", line_color="red", annotation_text="Cash Depletion"
+        )
+        fig.update_layout(
+            title="Cash Flow Projection", xaxis_title="Weeks", yaxis_title="Cash ($)"
+        )
         st.plotly_chart(fig, use_container_width=True)
 
 
@@ -270,14 +294,12 @@ def show_ar_page(user, agent):
     """AR management"""
     st.header("📄 Accounts Receivable")
 
-    invoices = st.session_state.db.get_invoices(user['company_id'])
+    invoices = st.session_state.db.get_invoices(user["company_id"])
 
     if invoices:
         # Summary
-        total_ar = sum(inv['balance']
-                       for inv in invoices if inv['balance'] > 0)
-        overdue_ar = sum(inv['balance']
-                         for inv in invoices if inv['days_overdue'] > 0)
+        total_ar = sum(inv["balance"] for inv in invoices if inv["balance"] > 0)
+        overdue_ar = sum(inv["balance"] for inv in invoices if inv["days_overdue"] > 0)
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -285,33 +307,46 @@ def show_ar_page(user, agent):
         with col2:
             st.metric("Overdue", f"${overdue_ar:,.0f}")
         with col3:
-            overdue_count = len(
-                [inv for inv in invoices if inv['days_overdue'] > 0])
+            overdue_count = len([inv for inv in invoices if inv["days_overdue"] > 0])
             st.metric("Overdue Count", overdue_count)
 
         # Invoices table
         df = pd.DataFrame(invoices)
-        df['amount'] = df['amount'].apply(lambda x: f"${x:,.0f}")
-        df['balance'] = df['balance'].apply(lambda x: f"${x:,.0f}")
+        df["amount"] = df["amount"].apply(lambda x: f"${x:,.0f}")
+        df["balance"] = df["balance"].apply(lambda x: f"${x:,.0f}")
 
-        st.dataframe(df[['invoice_number', 'customer_name', 'amount',
-                        'balance', 'due_date', 'days_overdue']],
-                     use_container_width=True, hide_index=True)
+        st.dataframe(
+            df[
+                [
+                    "invoice_number",
+                    "customer_name",
+                    "amount",
+                    "balance",
+                    "due_date",
+                    "days_overdue",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 def show_ap_page(user, agent):
     """AP management"""
     st.header("💳 Accounts Payable")
 
-    bills = st.session_state.db.get_bills(user['company_id'])
+    bills = st.session_state.db.get_bills(user["company_id"])
 
     if bills:
         # Summary
-        total_ap = sum(bill['balance']
-                       for bill in bills if bill['balance'] > 0)
-        due_soon = sum(bill['balance'] for bill in bills
-                       if bill['balance'] > 0 and
-                       (datetime.strptime(bill['due_date'], '%Y-%m-%d') - datetime.now()).days <= 7)
+        total_ap = sum(bill["balance"] for bill in bills if bill["balance"] > 0)
+        due_soon = sum(
+            bill["balance"]
+            for bill in bills
+            if bill["balance"] > 0
+            and (datetime.strptime(bill["due_date"], "%Y-%m-%d") - datetime.now()).days
+            <= 7
+        )
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -319,19 +354,38 @@ def show_ap_page(user, agent):
         with col2:
             st.metric("Due This Week", f"${due_soon:,.0f}")
         with col3:
-            urgent_count = len([bill for bill in bills
-                                if bill['balance'] > 0 and
-                                (datetime.strptime(bill['due_date'], '%Y-%m-%d') - datetime.now()).days <= 7])
+            urgent_count = len(
+                [
+                    bill
+                    for bill in bills
+                    if bill["balance"] > 0
+                    and (
+                        datetime.strptime(bill["due_date"], "%Y-%m-%d") - datetime.now()
+                    ).days
+                    <= 7
+                ]
+            )
             st.metric("Urgent Bills", urgent_count)
 
         # Bills table
         df = pd.DataFrame(bills)
-        df['amount'] = df['amount'].apply(lambda x: f"${x:,.0f}")
-        df['balance'] = df['balance'].apply(lambda x: f"${x:,.0f}")
+        df["amount"] = df["amount"].apply(lambda x: f"${x:,.0f}")
+        df["balance"] = df["balance"].apply(lambda x: f"${x:,.0f}")
 
-        st.dataframe(df[['bill_number', 'vendor_name', 'amount',
-                        'balance', 'due_date', 'category']],
-                     use_container_width=True, hide_index=True)
+        st.dataframe(
+            df[
+                [
+                    "bill_number",
+                    "vendor_name",
+                    "amount",
+                    "balance",
+                    "due_date",
+                    "category",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 def show_transactions_page(user, agent):
@@ -349,15 +403,15 @@ def show_transactions_page(user, agent):
 
     # Get transactions
     transactions = st.session_state.db.get_transactions(
-        user['company_id'], days=days, min_amount=min_amount, tx_type=tx_type
+        user["company_id"], days=days, min_amount=min_amount, tx_type=tx_type
     )
 
     if transactions:
         # Summary
-        total_income = sum(tx['amount']
-                           for tx in transactions if tx['amount'] > 0)
-        total_expenses = sum(abs(tx['amount'])
-                             for tx in transactions if tx['amount'] < 0)
+        total_income = sum(tx["amount"] for tx in transactions if tx["amount"] > 0)
+        total_expenses = sum(
+            abs(tx["amount"]) for tx in transactions if tx["amount"] < 0
+        )
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -369,10 +423,13 @@ def show_transactions_page(user, agent):
 
         # Transactions table
         df = pd.DataFrame(transactions)
-        df['amount'] = df['amount'].apply(lambda x: f"${x:,.2f}")
+        df["amount"] = df["amount"].apply(lambda x: f"${x:,.2f}")
 
-        st.dataframe(df[['date', 'merchant_name', 'amount', 'category']],
-                     use_container_width=True, hide_index=True)
+        st.dataframe(
+            df[["date", "merchant_name", "amount", "category"]],
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 def show_ai_chat(user, agent):
@@ -394,7 +451,7 @@ def show_ai_chat(user, agent):
             st.session_state.quick_question = "What are your top 3 recommendations?"
 
     # Chat interface
-    if 'chat_messages' not in st.session_state:
+    if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = []
 
     # Display messages
@@ -403,12 +460,11 @@ def show_ai_chat(user, agent):
             st.markdown(message["content"])
 
     # Handle quick questions
-    if 'quick_question' in st.session_state:
+    if "quick_question" in st.session_state:
         prompt = st.session_state.quick_question
         del st.session_state.quick_question
 
-        st.session_state.chat_messages.append(
-            {"role": "user", "content": prompt})
+        st.session_state.chat_messages.append({"role": "user", "content": prompt})
 
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -416,16 +472,17 @@ def show_ai_chat(user, agent):
         with st.chat_message("assistant"):
             with st.spinner("Analyzing..."):
                 response = agent.get_ai_insights(
-                    user['company_id'], user['company_name'], prompt)
+                    user["company_id"], user["company_name"], prompt
+                )
                 st.markdown(response)
 
         st.session_state.chat_messages.append(
-            {"role": "assistant", "content": response})
+            {"role": "assistant", "content": response}
+        )
 
     # Chat input
     if prompt := st.chat_input("Ask about your finances..."):
-        st.session_state.chat_messages.append(
-            {"role": "user", "content": prompt})
+        st.session_state.chat_messages.append({"role": "user", "content": prompt})
 
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -433,11 +490,13 @@ def show_ai_chat(user, agent):
         with st.chat_message("assistant"):
             with st.spinner("Analyzing..."):
                 response = agent.get_ai_insights(
-                    user['company_id'], user['company_name'], prompt)
+                    user["company_id"], user["company_name"], prompt
+                )
                 st.markdown(response)
 
         st.session_state.chat_messages.append(
-            {"role": "assistant", "content": response})
+            {"role": "assistant", "content": response}
+        )
 
 
 def sync_data(company_id):
@@ -462,7 +521,7 @@ def sync_data(company_id):
 def main():
     init_session_state()
 
-    if 'user' not in st.session_state:
+    if "user" not in st.session_state:
         show_login()
     else:
         show_dashboard(st.session_state.user)
