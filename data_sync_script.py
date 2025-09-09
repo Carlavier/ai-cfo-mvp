@@ -551,7 +551,7 @@ def sync_qb_bills(sync_manager, company_id: int, qb_client) -> int:
 
 
 def plaid_base_url() -> str:
-    env = os.getenv("PLAID_ENV", "sandbox").lower()
+    env = (os.getenv("PLAID_ENV", "sandbox") or st.secrets.get("PLAID_ENV", "sandbox")).lower()
     return {
         "sandbox": "https://sandbox.plaid.com",
         "development": "https://development.plaid.com",
@@ -625,8 +625,8 @@ def create_sandbox_public_token(
     """Create a sandbox public_token using Plaid's /sandbox/public_token/create."""
     products = products or ["transactions"]  # include 'transactions' for tx sync
     payload = {
-        "client_id": os.getenv("PLAID_CLIENT_ID"),
-        "secret": os.getenv("PLAID_SECRET"),
+        "client_id": os.getenv("PLAID_CLIENT_ID") or st.secrets["PLAID_CLIENT_ID"],
+        "secret": os.getenv("PLAID_SECRET") or st.secrets["PLAID_SECRET"],
         "institution_id": institution_id,
         "initial_products": products,
     }
@@ -658,8 +658,8 @@ def exchange_plaid_public_token() -> Dict:
 
     url = f"{plaid_base_url()}/item/public_token/exchange"
     payload = {
-        "client_id": os.getenv("PLAID_CLIENT_ID"),
-        "secret": os.getenv("PLAID_SECRET"),
+        "client_id":  os.getenv("PLAID_CLIENT_ID") or st.secrets["PLAID_CLIENT_ID"],
+        "secret": os.getenv("PLAID_SECRET") or st.secrets["PLAID_SECRET"],
         "public_token": public_token,
     }
     r = requests.post(url, json=payload, timeout=30)
@@ -672,8 +672,8 @@ def invalidate_plaid_access_token(access_token: str) -> str:
     """Call /item/access_token/invalidate and return new_access_token"""
     url = f"{plaid_base_url()}/item/access_token/invalidate"
     payload = {
-        "client_id": os.getenv("PLAID_CLIENT_ID"),
-        "secret": os.getenv("PLAID_SECRET"),
+        "client_id":os.getenv("PLAID_CLIENT_ID") or st.secrets["PLAID_CLIENT_ID"],
+        "secret":os.getenv("PLAID_SECRET") or st.secrets["PLAID_SECRET"],
         "access_token": access_token,
     }
     r = requests.post(url, json=payload, timeout=30)
