@@ -579,6 +579,7 @@ def get_company_plaid_token(company_id: int) -> str:
     return tokens.get("access_token") if tokens else None
 
 
+
 def get_company_qb_tokens(company_id: int) -> Dict:
     """Get stored QuickBooks tokens for company"""
     # Check if QuickBooks tokens exist in session state
