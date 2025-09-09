@@ -218,18 +218,61 @@ def sync_plaid_accounts(
 
     accounts_synced = 0
 
-    for account in response["accounts"]:
-        account_data = {
-            "company_id": company_id,
-            "account_id": account["account_id"],
-            "name": account["name"],
-            "institution_name": account.get("institution_name", ""),
-            "type": account["type"],
-            "subtype": account["subtype"],
-            "current_balance": account["balances"]["current"],
-            "available_balance": account["balances"]["available"],
-            "mask": account.get("mask", ""),
-        }
+    # Handle both dict-like response and Plaid response objects
+    accounts = (
+        response.get("accounts") if hasattr(response, "get") else response.accounts
+    )
+
+    for account in accounts:
+        # Convert Plaid objects to dict-like access if needed
+        if hasattr(account, "account_id"):
+            # Plaid response object
+            account_data = {
+                "company_id": company_id,
+                "account_id": account.account_id,
+                "name": account.name,
+                "institution_name": getattr(account, "institution_name", ""),
+                "type": (
+                    str(account.type.value)
+                    if hasattr(account.type, "value")
+                    else str(account.type)
+                ),
+                "subtype": (
+                    str(account.subtype.value)
+                    if hasattr(account.subtype, "value")
+                    else str(account.subtype)
+                ),
+                "current_balance": (
+                    float(account.balances.current) if account.balances.current else 0.0
+                ),
+                "available_balance": (
+                    float(account.balances.available)
+                    if account.balances.available
+                    else 0.0
+                ),
+                "mask": getattr(account, "mask", ""),
+            }
+        else:
+            # Dict-like response
+            account_data = {
+                "company_id": company_id,
+                "account_id": account["account_id"],
+                "name": account["name"],
+                "institution_name": account.get("institution_name", ""),
+                "type": str(account["type"]),
+                "subtype": str(account["subtype"]),
+                "current_balance": (
+                    float(account["balances"]["current"])
+                    if account["balances"]["current"]
+                    else 0.0
+                ),
+                "available_balance": (
+                    float(account["balances"]["available"])
+                    if account["balances"]["available"]
+                    else 0.0
+                ),
+                "mask": account.get("mask", ""),
+            }
 
         sync_manager.db.save_account(account_data)
         accounts_synced += 1
@@ -237,7 +280,9 @@ def sync_plaid_accounts(
     return accounts_synced
 
 
-def sync_plaid_transactions(sync_manager, company_id: int, access_token: str) -> int:
+def sync_plaid_transactions(
+    sync_manager: DataSyncManager, company_id: int, access_token: str
+) -> int:
     """Sync Plaid transactions"""
     # Get transactions for last 30 days
     start_date = datetime.now() - timedelta(days=30)
@@ -252,27 +297,69 @@ def sync_plaid_transactions(sync_manager, company_id: int, access_token: str) ->
     response = sync_manager.plaid_client.transactions_get(request)
     transactions_synced = 0
 
-    for transaction in response["transactions"]:
+    # Handle both dict-like response and Plaid response objects
+    transactions = (
+        response.get("transactions")
+        if hasattr(response, "get")
+        else response.transactions
+    )
+
+    for transaction in transactions:
         # Get local account ID
-        plaid_account_id = transaction["account_id"]
-        local_account = sync_manager.db.get_account_by_plaid_id(
-            company_id, plaid_account_id
-        )
+        if hasattr(transaction, "account_id"):
+            # Plaid response object
+            plaid_account_id = transaction.account_id
+            local_account = sync_manager.db.get_account_by_plaid_id(
+                company_id, plaid_account_id
+            )
 
-        if not local_account:
-            continue
+            if not local_account:
+                continue
 
-        transaction_data = {
-            "account_id": local_account["id"],
-            "transaction_id": transaction["transaction_id"],
-            "amount": -transaction["amount"],  # Plaid uses positive for outflow
-            "date": transaction["date"].isoformat(),
-            "merchant_name": transaction.get("merchant_name", "Unknown"),
-            "category": (
-                ",".join(transaction["category"]) if transaction["category"] else ""
-            ),
-            "pending": transaction["pending"],
-        }
+            # Convert date properly
+            transaction_date = transaction.date
+            if hasattr(transaction_date, "isoformat"):
+                date_str = transaction_date.isoformat()
+            else:
+                date_str = str(transaction_date)
+
+            transaction_data = {
+                "account_id": local_account["id"],
+                "transaction_id": transaction.transaction_id,
+                "amount": -float(transaction.amount),  # Plaid uses positive for outflow
+                "date": date_str,
+                "merchant_name": getattr(transaction, "merchant_name", None)
+                or getattr(transaction, "name", "Unknown"),
+                "category": (
+                    ",".join([str(cat) for cat in transaction.category])
+                    if hasattr(transaction, "category") and transaction.category
+                    else ""
+                ),
+                "pending": bool(getattr(transaction, "pending", False)),
+            }
+        else:
+            # Dict-like response
+            plaid_account_id = transaction["account_id"]
+            local_account = sync_manager.db.get_account_by_plaid_id(
+                company_id, plaid_account_id
+            )
+
+            if not local_account:
+                continue
+
+            transaction_data = {
+                "account_id": local_account["id"],
+                "transaction_id": transaction["transaction_id"],
+                "amount": -float(
+                    transaction["amount"]
+                ),  # Plaid uses positive for outflow
+                "date": str(transaction["date"]),
+                "merchant_name": transaction.get("merchant_name", "Unknown"),
+                "category": (
+                    ",".join(transaction["category"]) if transaction["category"] else ""
+                ),
+                "pending": bool(transaction["pending"]),
+            }
 
         if sync_manager.db.save_transaction(transaction_data) > 0:
             transactions_synced += 1
