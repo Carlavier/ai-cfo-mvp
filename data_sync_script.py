@@ -1,6 +1,8 @@
 # data_sync.py - API Data Sync Script
 import os
+from pathlib import Path
 import requests
+import json
 from datetime import datetime, timedelta
 from typing import List, Dict
 from database_module import DatabaseManager
@@ -197,18 +199,61 @@ def sync_plaid_accounts(sync_manager, company_id: int, access_token: str) -> int
 
     accounts_synced = 0
 
-    for account in response['accounts']:
-        account_data = {
-            'company_id': company_id,
-            'account_id': account['account_id'],
-            'name': account['name'],
-            'institution_name': account.get('institution_name', ''),
-            'type': account['type'],
-            'subtype': account['subtype'],
-            'current_balance': account['balances']['current'],
-            'available_balance': account['balances']['available'],
-            'mask': account.get('mask', '')
-        }
+    # Handle both dict-like response and Plaid response objects
+    accounts = (
+        response.get("accounts") if hasattr(response, "get") else response.accounts
+    )
+
+    for account in accounts:
+        # Convert Plaid objects to dict-like access if needed
+        if hasattr(account, "account_id"):
+            # Plaid response object
+            account_data = {
+                "company_id": company_id,
+                "account_id": account.account_id,
+                "name": account.name,
+                "institution_name": getattr(account, "institution_name", ""),
+                "type": (
+                    str(account.type.value)
+                    if hasattr(account.type, "value")
+                    else str(account.type)
+                ),
+                "subtype": (
+                    str(account.subtype.value)
+                    if hasattr(account.subtype, "value")
+                    else str(account.subtype)
+                ),
+                "current_balance": (
+                    float(account.balances.current) if account.balances.current else 0.0
+                ),
+                "available_balance": (
+                    float(account.balances.available)
+                    if account.balances.available
+                    else 0.0
+                ),
+                "mask": getattr(account, "mask", ""),
+            }
+        else:
+            # Dict-like response
+            account_data = {
+                "company_id": company_id,
+                "account_id": account["account_id"],
+                "name": account["name"],
+                "institution_name": account.get("institution_name", ""),
+                "type": str(account["type"]),
+                "subtype": str(account["subtype"]),
+                "current_balance": (
+                    float(account["balances"]["current"])
+                    if account["balances"]["current"]
+                    else 0.0
+                ),
+                "available_balance": (
+                    float(account["balances"]["available"])
+                    if account["balances"]["available"]
+                    else 0.0
+                ),
+                "mask": account.get("mask", ""),
+            }
 
         sync_manager.db.save_account(account_data)
         accounts_synced += 1
@@ -231,25 +276,69 @@ def sync_plaid_transactions(sync_manager, company_id: int, access_token: str) ->
     response = sync_manager.plaid_client.transactions_get(request)
     transactions_synced = 0
 
-    for transaction in response['transactions']:
+    # Handle both dict-like response and Plaid response objects
+    transactions = (
+        response.get("transactions")
+        if hasattr(response, "get")
+        else response.transactions
+    )
+
+    for transaction in transactions:
         # Get local account ID
-        plaid_account_id = transaction['account_id']
-        local_account = sync_manager.db.get_account_by_plaid_id(
-            company_id, plaid_account_id)
+        if hasattr(transaction, "account_id"):
+            # Plaid response object
+            plaid_account_id = transaction.account_id
+            local_account = sync_manager.db.get_account_by_plaid_id(
+                company_id, plaid_account_id
+            )
 
-        if not local_account:
-            continue
+            if not local_account:
+                continue
 
-        transaction_data = {
-            'account_id': local_account['id'],
-            'transaction_id': transaction['transaction_id'],
-            # Plaid uses positive for outflow
-            'amount': -transaction['amount'],
-            'date': transaction['date'].isoformat(),
-            'merchant_name': transaction.get('merchant_name', 'Unknown'),
-            'category': ','.join(transaction['category']) if transaction['category'] else '',
-            'pending': transaction['pending']
-        }
+            # Convert date properly
+            transaction_date = transaction.date
+            if hasattr(transaction_date, "isoformat"):
+                date_str = transaction_date.isoformat()
+            else:
+                date_str = str(transaction_date)
+
+            transaction_data = {
+                "account_id": local_account["id"],
+                "transaction_id": transaction.transaction_id,
+                "amount": -float(transaction.amount),  # Plaid uses positive for outflow
+                "date": date_str,
+                "merchant_name": getattr(transaction, "merchant_name", None)
+                or getattr(transaction, "name", "Unknown"),
+                "category": (
+                    ",".join([str(cat) for cat in transaction.category])
+                    if hasattr(transaction, "category") and transaction.category
+                    else ""
+                ),
+                "pending": bool(getattr(transaction, "pending", False)),
+            }
+        else:
+            # Dict-like response
+            plaid_account_id = transaction["account_id"]
+            local_account = sync_manager.db.get_account_by_plaid_id(
+                company_id, plaid_account_id
+            )
+
+            if not local_account:
+                continue
+
+            transaction_data = {
+                "account_id": local_account["id"],
+                "transaction_id": transaction["transaction_id"],
+                "amount": -float(
+                    transaction["amount"]
+                ),  # Plaid uses positive for outflow
+                "date": str(transaction["date"]),
+                "merchant_name": transaction.get("merchant_name", "Unknown"),
+                "category": (
+                    ",".join(transaction["category"]) if transaction["category"] else ""
+                ),
+                "pending": bool(transaction["pending"]),
+            }
 
         if sync_manager.db.save_transaction(transaction_data) > 0:
             transactions_synced += 1
@@ -346,15 +435,160 @@ def sync_quickbooks_data(company_id: int) -> bool:
         return True
 
 
+def sync_qb_invoices(sync_manager, company_id: int, qb_client) -> int:
+    """Sync QuickBooks invoices"""
+    invoices = Invoice.all(qb=qb_client)
+    invoices_synced = 0
+
+    for invoice in invoices:
+        # Calculate days overdue
+        if invoice.DueDate:
+            due_date = datetime.strptime(invoice.DueDate, "%Y-%m-%d")
+            days_overdue = (
+                max(0, (datetime.now() - due_date).days) if invoice.Balance > 0 else 0
+            )
+        else:
+            days_overdue = 0
+
+        # Determine status
+        if invoice.Balance == 0:
+            status = "paid"
+        elif days_overdue > 0:
+            status = "overdue"
+        else:
+            status = "pending"
+
+        invoice_data = {
+            "company_id": company_id,
+            "qb_invoice_id": invoice.Id,
+            "invoice_number": invoice.DocNumber or f"INV-{invoice.Id}",
+            "customer_name": (
+                invoice.CustomerRef.name if invoice.CustomerRef else "Unknown"
+            ),
+            "amount": float(invoice.TotalAmt or 0),
+            "balance": float(invoice.Balance or 0),
+            "due_date": invoice.DueDate or datetime.now().strftime("%Y-%m-%d"),
+            "issue_date": invoice.TxnDate or datetime.now().strftime("%Y-%m-%d"),
+            "status": status,
+            "days_overdue": days_overdue,
+        }
+
+        sync_manager.db.save_invoice(invoice_data)
+        invoices_synced += 1
+
+    return invoices_synced
+
+
+def sync_qb_bills(sync_manager, company_id: int, qb_client) -> int:
+    """Sync QuickBooks bills"""
+    bills = Bill.all(qb=qb_client)
+    bills_synced = 0
+
+    for bill in bills:
+        # Determine status
+        if bill.Balance == 0:
+            status = "paid"
+        elif bill.DueDate:
+            due_date = datetime.strptime(bill.DueDate, "%Y-%m-%d")
+            if due_date < datetime.now():
+                status = "overdue"
+            else:
+                status = "pending"
+        else:
+            status = "pending"
+
+        bill_data = {
+            "company_id": company_id,
+            "qb_bill_id": bill.Id,
+            "bill_number": bill.DocNumber or f"BILL-{bill.Id}",
+            "vendor_name": bill.VendorRef.name if bill.VendorRef else "Unknown",
+            "amount": float(bill.TotalAmt or 0),
+            "balance": float(bill.Balance or 0),
+            "due_date": bill.DueDate or datetime.now().strftime("%Y-%m-%d"),
+            "category": "General",
+            "status": status,
+        }
+
+        sync_manager.db.save_bill(bill_data)
+        bills_synced += 1
+
+    return bills_synced
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def plaid_base_url() -> str:
+    env = os.getenv("PLAID_ENV", "sandbox").lower()
+    return {
+        "sandbox": "https://sandbox.plaid.com",
+        "development": "https://development.plaid.com",
+        "production": "https://production.plaid.com",
+    }.get(env, "https://sandbox.plaid.com")
+
+
 def get_company_plaid_token(company_id: int) -> str:
     """Get stored Plaid access token for company"""
-    # In a real app, you'd store these in the database
-    # For demo, return None (will use mock data)
-    return None
+    db = DatabaseManager()
+    tokens = db.get_plaid_tokens(company_id)
+    if not tokens:
+        # No tokens found - create new ones and store in DB
+        print(
+            f"📝 No Plaid tokens found for company {company_id}, creating new ones..."
+        )
+        response = exchange_plaid_public_token()
+        # Store the new tokens in database
+        db.set_plaid_tokens(company_id, response["access_token"], response["item_id"])
+        print(f"✅ Stored new Plaid tokens for company {company_id}")
+
+        print(f"✅ Access Token { response["access_token"]}")
+
+        return response["access_token"]
+    return tokens.get("access_token") if tokens else None
+
 
 
 def get_company_qb_tokens(company_id: int) -> Dict:
-    if st.session_state["access_token"] and st.session_state["refresh_token"] and st.session_state["realm_id"]:
+    """Get stored QuickBooks tokens for company"""
+    # Check if QuickBooks tokens exist in session state
+    if ("access_token" in st.session_state and 
+        "refresh_token" in st.session_state and 
+        "realm_id" in st.session_state and
+        st.session_state["access_token"] and 
+        st.session_state["refresh_token"] and 
+        st.session_state["realm_id"]):
         return {
             'access_token': st.session_state["access_token"],
             'refresh_token': st.session_state["refresh_token"],
@@ -382,6 +616,70 @@ def get_company_qb_tokens(company_id: int) -> Dict:
     st.markdown(f"[🔗 Connect to QuickBooks]({auth_url})")
 
     return None
+
+def create_sandbox_public_token(
+    institution_id: str = "ins_3",
+    products: list[str] | None = None,
+    options: dict | None = None,
+) -> str:
+    """Create a sandbox public_token using Plaid's /sandbox/public_token/create."""
+    products = products or ["transactions"]  # include 'transactions' for tx sync
+    payload = {
+        "client_id": os.getenv("PLAID_CLIENT_ID"),
+        "secret": os.getenv("PLAID_SECRET"),
+        "institution_id": institution_id,
+        "initial_products": products,
+    }
+    if options:
+        payload["options"] = options
+
+    url = f"{plaid_base_url()}/sandbox/public_token/create"
+    r = requests.post(url, json=payload, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+
+    print(f"✅ Public  Token { data["public_token"]}")
+
+    return data["public_token"]
+
+
+def exchange_plaid_public_token_for_company(company_id: int, public_token: str) -> Dict:
+    """Exchange public_token, store tokens for company in DB, and return stored record"""
+    tokens = exchange_plaid_public_token(public_token)
+    db = DatabaseManager()
+    db.set_plaid_tokens(company_id, tokens["access_token"], tokens["item_id"])
+    return db.get_plaid_tokens(company_id)
+
+
+def exchange_plaid_public_token() -> Dict:
+    """Call /item/public_token/exchange and return {'access_token','item_id'}"""
+
+    public_token = create_sandbox_public_token()
+
+    url = f"{plaid_base_url()}/item/public_token/exchange"
+    payload = {
+        "client_id": os.getenv("PLAID_CLIENT_ID"),
+        "secret": os.getenv("PLAID_SECRET"),
+        "public_token": public_token,
+    }
+    r = requests.post(url, json=payload, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    return {"access_token": data["access_token"], "item_id": data["item_id"]}
+
+
+def invalidate_plaid_access_token(access_token: str) -> str:
+    """Call /item/access_token/invalidate and return new_access_token"""
+    url = f"{plaid_base_url()}/item/access_token/invalidate"
+    payload = {
+        "client_id": os.getenv("PLAID_CLIENT_ID"),
+        "secret": os.getenv("PLAID_SECRET"),
+        "access_token": access_token,
+    }
+    r = requests.post(url, json=payload, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    return data["new_access_token"]
 
 
 def setup_company_integrations():
