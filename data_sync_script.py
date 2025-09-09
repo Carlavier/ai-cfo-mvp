@@ -457,14 +457,21 @@ def plaid_base_url() -> str:
 
 def get_company_plaid_token(company_id: int) -> str:
     """Get stored Plaid access token for company"""
-    # In a real app, you'd store these in the database
-    # For demo, return None (will use mock data)
-
     db = DatabaseManager()
     tokens = db.get_plaid_tokens(company_id)
     if not tokens:
-        access_token = exchange_plaid_public_token()
-        return access_token
+        # No tokens found - create new ones and store in DB
+        print(
+            f"📝 No Plaid tokens found for company {company_id}, creating new ones..."
+        )
+        response = exchange_plaid_public_token()
+        # Store the new tokens in database
+        db.set_plaid_tokens(company_id, response["access_token"], response["item_id"])
+        print(f"✅ Stored new Plaid tokens for company {company_id}")
+
+        print(f"✅ Access Token { response["access_token"]}")
+
+        return response["access_token"]
     return tokens.get("access_token") if tokens else None
 
 
@@ -495,6 +502,9 @@ def create_sandbox_public_token(
     r = requests.post(url, json=payload, timeout=30)
     r.raise_for_status()
     data = r.json()
+
+    print(f"✅ Public  Token { data["public_token"]}")
+
     return data["public_token"]
 
 
