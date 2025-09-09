@@ -581,13 +581,13 @@ def get_company_plaid_token(company_id: int) -> str:
 
 def get_company_qb_tokens(company_id: int) -> Dict:
     """Get stored QuickBooks tokens for company"""
-    # In a real app, you'd store these in the database
-    # For demo, return None (will use mock data)
-    return None
-
-
-def get_company_qb_tokens(company_id: int) -> Dict:
-    if st.session_state["access_token"] and st.session_state["refresh_token"] and st.session_state["realm_id"]:
+    # Check if QuickBooks tokens exist in session state
+    if ("access_token" in st.session_state and 
+        "refresh_token" in st.session_state and 
+        "realm_id" in st.session_state and
+        st.session_state["access_token"] and 
+        st.session_state["refresh_token"] and 
+        st.session_state["realm_id"]):
         return {
             'access_token': st.session_state["access_token"],
             'refresh_token': st.session_state["refresh_token"],

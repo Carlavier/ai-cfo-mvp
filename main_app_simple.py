@@ -35,6 +35,16 @@ def init_session_state():
 
     if 'ai' not in st.session_state:
         st.session_state.ai = DeepSeekClient()
+    
+    # Initialize QuickBooks token session state variables
+    if 'access_token' not in st.session_state:
+        st.session_state["access_token"] = None
+    
+    if 'refresh_token' not in st.session_state:
+        st.session_state["refresh_token"] = None
+    
+    if 'realm_id' not in st.session_state:
+        st.session_state["realm_id"] = None
 
 
 def show_login():
