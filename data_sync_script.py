@@ -514,44 +514,8 @@ def sync_qb_bills(sync_manager, company_id: int, qb_client) -> int:
 
     return bills_synced
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def plaid_base_url() -> str:
-    env = (os.getenv("PLAID_ENV", "sandbox") or st.secrets.get("PLAID_ENV", "sandbox")).lower()
+    env = (os.getenv("PLAID_ENV") or st.secrets["PLAID_ENV"] or "sandbox").lower()
     return {
         "sandbox": "https://sandbox.plaid.com",
         "development": "https://development.plaid.com",
@@ -704,7 +668,7 @@ def setup_company_integrations():
 
     # Setup Plaid
     print("\n1. Plaid Integration:")
-    if PLAID_AVAILABLE and (os.getenv('PLAID_CLIENT_ID') or st.secrets.get("PLAID_CLIENT_ID")):
+    if PLAID_AVAILABLE and (os.getenv('PLAID_CLIENT_ID') or st.secrets["PLAID_CLIENT_ID"]):
         setup_plaid = input("Setup Plaid? (y/n): ").lower() == 'y'
         if setup_plaid:
             # In a real app, you'd do the OAuth flow here
@@ -715,7 +679,7 @@ def setup_company_integrations():
 
     # Setup QuickBooks
     print("\n2. QuickBooks Integration:")
-    if QB_AVAILABLE and (os.getenv('QB_CLIENT_ID') or st.secrets.get("QB_CLIENT_ID")):
+    if QB_AVAILABLE and (os.getenv('QB_CLIENT_ID') or st.secrets["QB_CLIENT_ID"]):
         setup_qb = input("Setup QuickBooks? (y/n): ").lower() == 'y'
         if setup_qb:
             # In a real app, you'd do the OAuth flow here
