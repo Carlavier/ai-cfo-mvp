@@ -392,6 +392,7 @@ class DatabaseManager:
             transaction_id = cursor.lastrowid
             conn.commit()
         except sqlite3.IntegrityError:
+            print("Insert transaction success!")
             # Transaction already exists
             transaction_id = 0
 

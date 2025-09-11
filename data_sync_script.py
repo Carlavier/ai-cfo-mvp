@@ -67,6 +67,152 @@ def qb_request(
     raise Exception(f"QuickBooks API error {resp.status_code}: {resp.text}")
 
 
+# --------------------- QuickBooks entity helper utilities ---------------------
+def qb_find_entity_by_name(qb_tokens: Dict, entity: str, name: str) -> Optional[Dict]:
+    """Find entity by its Display/FullyQualified name; handles Customer/Vendor/Item differences."""
+    # QuickBooks SQL uses DisplayName for Customer/Vendor, Name for Item; FullyQualifiedName works generally.
+    safe = name.replace("'", "''")
+    for field in ("FullyQualifiedName", "DisplayName", "Name"):
+        try:
+            data = qb_query(
+                qb_tokens,
+                f"select Id, {field}, Active from {entity} where {field} = '{safe}'",
+            )
+            items = data.get("QueryResponse", {}).get(entity, [])
+            if items:
+                return items[0]
+        except Exception:
+            continue
+    return None
+
+
+def _qb_safe_create(
+    qb_tokens: Dict, endpoint: str, root_key: str, payload: Dict, name: str
+) -> Dict:
+    """Create entity, swallowing duplicate name (6240) by returning existing one."""
+    try:
+        data = qb_request("POST", endpoint, qb_tokens, payload)
+        return data.get(root_key, payload)
+    except Exception as e:
+        # Detect duplicate name error
+        if "6240" in str(e):
+            existing = (
+                qb_find_entity_by_name(qb_tokens, root_key, name)
+                if root_key in ("Customer", "Vendor", "Item")
+                else None
+            )
+            if existing:
+                return existing
+        raise
+
+
+def qb_ensure_customer(qb_tokens: Dict, name: str) -> Dict:
+    existing = qb_find_entity_by_name(qb_tokens, "Customer", name)
+    if existing:
+        return existing
+    payload = {"DisplayName": name}
+    return _qb_safe_create(qb_tokens, "customer", "Customer", payload, name)
+
+
+def qb_ensure_vendor(qb_tokens: Dict, name: str) -> Dict:
+    existing = qb_find_entity_by_name(qb_tokens, "Vendor", name)
+    if existing:
+        return existing
+    payload = {"DisplayName": name}
+    return _qb_safe_create(qb_tokens, "vendor", "Vendor", payload, name)
+
+
+def qb_ensure_item_service(qb_tokens: Dict, name: str = "Services") -> Dict:
+    existing = qb_find_entity_by_name(qb_tokens, "Item", name)
+    if existing:
+        return existing
+    payload = {
+        "Name": name,
+        "Type": "Service",
+        "IncomeAccountRef": {
+            "value": ensure_qb_account(qb_tokens, "Sales", "Income")["Id"]
+        },
+    }
+    return _qb_safe_create(qb_tokens, "item", "Item", payload, name)
+
+
+def qb_find_invoice_by_privatenote(qb_tokens: Dict, note: str) -> Optional[Dict]:
+    try:
+        data = qb_query(
+            qb_tokens,
+            f"select Id, PrivateNote from Invoice where PrivateNote = '{note}'",
+        )
+        invoices = data.get("QueryResponse", {}).get("Invoice", [])
+        return invoices[0] if invoices else None
+    except Exception:
+        return None
+
+
+def qb_find_bill_by_privatenote(qb_tokens: Dict, note: str) -> Optional[Dict]:
+    try:
+        data = qb_query(
+            qb_tokens, f"select Id, PrivateNote from Bill where PrivateNote = '{note}'"
+        )
+        bills = data.get("QueryResponse", {}).get("Bill", [])
+        return bills[0] if bills else None
+    except Exception:
+        return None
+
+
+def qb_create_invoice_from_txn(qb_tokens: Dict, txn: Dict) -> Optional[Dict]:
+    note = f"PLD:{txn['transaction_id']}"
+    if qb_find_invoice_by_privatenote(qb_tokens, note):
+        return None  # already exists
+    customer = qb_ensure_customer(qb_tokens, txn.get("merchant_name") or "Customer")
+    item = qb_ensure_item_service(qb_tokens, "Services")
+    amount = round(abs(float(txn["amount"])), 2)
+    payload = {
+        "Line": [
+            {
+                "DetailType": "SalesItemLineDetail",
+                "Amount": amount,
+                "SalesItemLineDetail": {
+                    "ItemRef": {"value": item["Id"], "name": item.get("Name")}
+                },
+            }
+        ],
+        "CustomerRef": {"value": customer["Id"], "name": customer.get("DisplayName")},
+        "TxnDate": txn.get("date"),
+        "PrivateNote": note,
+    }
+    data = qb_request("POST", "invoice?minorversion=75", qb_tokens, payload)
+    return data.get("Invoice")
+
+
+def qb_create_bill_from_txn(qb_tokens: Dict, txn: Dict) -> Optional[Dict]:
+    note = f"PLD:{txn['transaction_id']}"
+    if qb_find_bill_by_privatenote(qb_tokens, note):
+        return None
+    vendor = qb_ensure_vendor(qb_tokens, txn.get("merchant_name") or "Vendor")
+    # Map category to expense account
+    qb_acc_name, qb_acc_type, qb_acc_subtype = map_plaid_category_to_qb(
+        (txn.get("category") or "").split(",")[0], False
+    )
+    expense_acc = ensure_qb_account(qb_tokens, qb_acc_name, qb_acc_type, qb_acc_subtype)
+    amount = round(abs(float(txn["amount"])), 2)
+    payload = {
+        "Line": [
+            {
+                "DetailType": "AccountBasedExpenseLineDetail",
+                "Amount": amount,
+                "AccountBasedExpenseLineDetail": {
+                    "AccountRef": {"value": expense_acc["Id"]}
+                },
+            }
+        ],
+        "VendorRef": {"value": vendor["Id"], "name": vendor.get("DisplayName")},
+        "TxnDate": txn.get("date"),
+        "PrivateNote": note,
+    }
+    data = qb_request("POST", "bill?minorversion=75", qb_tokens, payload)
+    return data.get("Bill")
+
+
 def qb_query(qb_tokens: Dict, q: str) -> Dict:
     # Escape single-quotes for QBO SQL
     q_escaped = q.replace("'", "''")
@@ -458,41 +604,100 @@ def sync_plaid_transactions(
                 "pending": bool(transaction["pending"]),
             }
 
-        if sync_manager.db.save_transaction(transaction_data) > 0:
-            transactions_synced += 1
-            # collect for QB push if not pending
-            # if not transaction_data["pending"]:
-            #     # Cache local account for later account name/ mask usage
-            #     if (
-            #         transaction_data["account_id"] not in local_accounts_cache
-            #         and local_account
-            #     ):
-            #         local_accounts_cache[transaction_data["account_id"]] = local_account
-            batch_candidates.append(transaction_data)
+        inserted = sync_manager.db.save_transaction(transaction_data)
+        # if not inserted:
+        #     # Already processed; skip QB doc creation to avoid duplicates
+        #     continue
 
-    # Batch push to QuickBooks if tokens present
-    qb_tokens = get_company_qb_tokens(company_id)
-    if qb_tokens and batch_candidates:
-        # Break into chunks of 30 (QBO limit)
-        for i in range(0, len(batch_candidates), 30):
-            chunk = batch_candidates[i : i + 30]
+        transactions_synced += 1
+
+        # Classification: income (amount > 0 after our sign flip means inflow?)
+        # We negated Plaid's outflow amounts, so expenses are negative numbers  now. Income will be positive.
+        is_income = transaction_data["amount"] > 0
+
+        # Attempt QuickBooks document creation only if QB tokens present
+        qb_tokens = get_company_qb_tokens(company_id)
+
+        # Optional debug
+        # print("qb token", bool(qb_tokens))
+        if qb_tokens:
             try:
-                items = build_batch_journal_items(
-                    qb_tokens, chunk, local_accounts_cache
-                )
-                if items:
-                    resp = qb_batch_post(qb_tokens, items)
-                    # Optional: inspect resp for faults and print brief summary
-                    faults = []
-                    for bri in resp.get("BatchItemResponse", []):
-                        if "Fault" in bri:
-                            faults.append(
-                                {"bId": bri.get("bId"), "Fault": bri["Fault"]}
-                            )
-                    if faults:
-                        print(f"⚠️ QB batch faults: {len(faults)} of {len(items)}")
+                if is_income:
+                    inv = qb_create_invoice_from_txn(
+                        qb_tokens,
+                        {
+                            "transaction_id": transaction_data["transaction_id"],
+                            "amount": transaction_data["amount"],
+                            "date": transaction_data["date"],
+                            "merchant_name": transaction_data.get("merchant_name"),
+                            "category": transaction_data.get("category"),
+                        },
+                    )
+                    if inv:
+                        # invoice_data = {
+                        #     "company_id": company_id,
+                        #     "qb_invoice_id": inv.get("Id"),
+                        #     "invoice_number": inv.get("DocNumber", ""),
+                        #     "customer_name": inv.get("CustomerRef", {}).get(
+                        #         "name",
+                        #         transaction_data.get("merchant_name", "Customer"),
+                        #     ),
+                        #     "amount": float(
+                        #         inv.get("TotalAmt", abs(transaction_data["amount"]))
+                        #     ),
+                        #     "balance": float(
+                        #         inv.get("Balance", abs(transaction_data["amount"]))
+                        #     ),
+                        #     "due_date": inv.get("DueDate", transaction_data["date"]),
+                        #     "issue_date": inv.get("TxnDate", transaction_data["date"]),
+                        #     "status": inv.get("TxnStatus", "pending"),
+                        #     "days_overdue": 0,
+                        # }
+                        # sync_manager.db.save_invoice(invoice_data)
+                        print(
+                            f"🧾 Created QB Invoice for txn {transaction_data['transaction_id']} amount {transaction_data['amount']}"
+                        )
+                else:
+                    bill = qb_create_bill_from_txn(
+                        qb_tokens,
+                        {
+                            "transaction_id": transaction_data["transaction_id"],
+                            "amount": transaction_data["amount"],
+                            "date": transaction_data["date"],
+                            "merchant_name": transaction_data.get("merchant_name"),
+                            "category": transaction_data.get("category"),
+                        },
+                    )
+                    if bill:
+                        # bill_data = {
+                        #     "company_id": company_id,
+                        #     "qb_bill_id": bill.get("Id"),
+                        #     "bill_number": bill.get("DocNumber", ""),
+                        #     "vendor_name": bill.get("VendorRef", {}).get(
+                        #         "name",
+                        #         transaction_data.get("merchant_name", "Vendor"),
+                        #     ),
+                        #     "amount": float(
+                        #         bill.get("TotalAmt", abs(transaction_data["amount"]))
+                        #     ),
+                        #     "balance": float(
+                        #         bill.get("Balance", abs(transaction_data["amount"]))
+                        #     ),
+                        #     "due_date": bill.get("DueDate", transaction_data["date"]),
+                        #     "category": transaction_data.get("category"),
+                        #     "status": bill.get("TxnStatus", "pending"),
+                        # }
+                        # sync_manager.db.save_bill(bill_data)
+                        print(
+                            f"📄 Created QB Bill for txn {transaction_data['transaction_id']} amount {transaction_data['amount']}"
+                        )
             except Exception as e:
-                print(f"⚠️ QB batch push failed: {e}")
+                print(
+                    f"⚠️ QB doc create failed (invoice/bill) for txn {transaction_data['transaction_id']}: {e}"
+                )
+        else:
+            # No QuickBooks connection; skip silently
+            pass
 
     return transactions_synced
 
@@ -665,11 +870,11 @@ def sync_quickbooks_data(company_id: int) -> bool:
 
     qb_tokens = get_company_qb_tokens(company_id)
     if not qb_tokens:
-        print(f"❌ No QuickBooks tokens for company {company_id}, using mock")
-        inv, bill = seed_mock_quickbooks(sync_manager.db, company_id)
-        sync_manager.db.log_sync(
-            company_id, "quickbooks", "mock_seed", inv + bill, True
-        )
+        print(f"❌ No QuickBooks tokens for company {company_id}")
+        # inv, bill = seed_mock_quickbooks(sync_manager.db, company_id)
+        # sync_manager.db.log_sync(
+        #     company_id, "quickbooks", "mock_seed", inv + bill, True
+        # )
         return True
 
     try:
@@ -686,10 +891,10 @@ def sync_quickbooks_data(company_id: int) -> bool:
         return True
     except Exception as e:
         print(f"❌ Sync failed: {e}, falling back to mock")
-        inv, bill = seed_mock_quickbooks(sync_manager.db, company_id)
-        sync_manager.db.log_sync(
-            company_id, "quickbooks", "mock_seed", inv + bill, True
-        )
+        # inv, bill = seed_mock_quickbooks(sync_manager.db, company_id)
+        # sync_manager.db.log_sync(
+        #     company_id, "quickbooks", "mock_seed", inv + bill, True
+        # )
         return True
 
 

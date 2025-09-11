@@ -479,9 +479,9 @@ def quickbooks_auth_handler():
 
     if auth_code and realm_id:
         # Đổi code sang token
-        CLIENT_ID = st.secrets["QB_CLIENT_ID"]
-        CLIENT_SECRET = st.secrets["QB_CLIENT_SECRET"]
-        REDIRECT_URI = st.secrets["QB_CLIENT_REDIRECT_URL"]
+        CLIENT_ID =os.getenv("QB_CLIENT_ID") or  st.secrets["QB_CLIENT_ID"] 
+        CLIENT_SECRET = os.getenv("QB_CLIENT_SECRET") or st.secrets["QB_CLIENT_SECRET"]
+        REDIRECT_URI = os.getenv("QB_CLIENT_REDIRECT_URL")  or  st.secrets["QB_CLIENT_REDIRECT_URL"]
 
         token_url = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
         resp = requests.post(
