@@ -69,41 +69,61 @@ def qb_request(
 
 # --------------------- QuickBooks entity helper utilities ---------------------
 def qb_find_entity_by_name(qb_tokens: Dict, entity: str, name: str) -> Optional[Dict]:
-    """Find entity by its Display/FullyQualified name; handles Customer/Vendor/Item differences."""
-    # QuickBooks SQL uses DisplayName for Customer/Vendor, Name for Item; FullyQualifiedName works generally.
+    """Find entity by name using correct field mapping to avoid parser errors."""
+    if not name:
+        return None
+    field_map = {
+        "Customer": "DisplayName",
+        "Vendor": "DisplayName",
+        "Item": "Name",
+    }
+    field = field_map.get(entity, "Name")
     safe = name.replace("'", "''")
-    for field in ("FullyQualifiedName", "DisplayName", "Name"):
-        try:
-            data = qb_query(
-                qb_tokens,
-                f"select Id, {field}, Active from {entity} where {field} = '{safe}'",
-            )
-            items = data.get("QueryResponse", {}).get(entity, [])
-            if items:
-                return items[0]
-        except Exception:
-            continue
-    return None
+    query = f"select Id, {field} from {entity} where {field} = '{safe}'"
+    try:
+        data = qb_query(qb_tokens, query)
+        items = data.get("QueryResponse", {}).get(entity, [])
+        return items[0] if items else None
+    except Exception as e:
+        if os.getenv("QUICKBOOKS_DEBUG") == "1":
+            print(f"[QB DEBUG] find_entity query failed: {query} error={e}")
+        return None
 
 
 def _qb_safe_create(
     qb_tokens: Dict, endpoint: str, root_key: str, payload: Dict, name: str
 ) -> Dict:
-    """Create entity, swallowing duplicate name (6240) by returning existing one."""
-    try:
-        data = qb_request("POST", endpoint, qb_tokens, payload)
-        return data.get(root_key, payload)
-    except Exception as e:
-        # Detect duplicate name error
-        if "6240" in str(e):
-            existing = (
-                qb_find_entity_by_name(qb_tokens, root_key, name)
-                if root_key in ("Customer", "Vendor", "Item")
-                else None
-            )
-            if existing:
-                return existing
-        raise
+    """Create entity; on duplicate (6240) retry with suffixed names then fetch existing."""
+    base_name = name
+    for attempt in range(0, 3):
+        try:
+            # Adjust payload name field per entity type each attempt
+            if root_key == "Customer":
+                payload["DisplayName"] = name
+            elif root_key == "Vendor":
+                payload["DisplayName"] = name
+            elif root_key == "Item":
+                payload["Name"] = name
+            data = qb_request("POST", endpoint, qb_tokens, payload)
+            return data.get(root_key, payload)
+        except Exception as e:
+            msg = str(e)
+            if "6240" in msg:  # duplicate name
+                existing = (
+                    qb_find_entity_by_name(qb_tokens, root_key, name)
+                    if root_key in ("Customer", "Vendor", "Item")
+                    else None
+                )
+                if existing:
+                    return existing
+                name = f"{base_name}-{attempt+1}"
+                continue
+            raise
+    # Final fallback
+    existing = qb_find_entity_by_name(qb_tokens, root_key, base_name)
+    if existing:
+        return existing
+    return {"Id": None, "Name": base_name}
 
 
 def qb_ensure_customer(qb_tokens: Dict, name: str) -> Dict:
@@ -214,16 +234,25 @@ def qb_create_bill_from_txn(qb_tokens: Dict, txn: Dict) -> Optional[Dict]:
 
 
 def qb_query(qb_tokens: Dict, q: str) -> Dict:
-    # Escape single-quotes for QBO SQL
-    q_escaped = q.replace("'", "''")
-    endpoint = f"query?query={urllib.parse.quote(q_escaped)}&minorversion=70"
+    """Run a QBO query.
+
+    IMPORTANT: Do NOT globally double every single quote in the whole query string.
+    That breaks the delimiting quotes (e.g. 'Name' -> ''Name'') and produces
+    QueryParserError (code 4000) like the one you observed: Encountered IDENTIFIER
+    'Uncategorized'. Instead, callers must escape ONLY the literal values they
+    interpolate (by replacing internal single quotes with doubled quotes) before
+    passing the final query here.
+    """
+    endpoint = f"query?query={urllib.parse.quote(q)}&minorversion=70"
     return qb_request("GET", endpoint, qb_tokens)
 
 
 def qb_get_account_by_name(qb_tokens: Dict, name: str) -> Optional[Dict]:
+    # Escape embedded single quotes inside the name only (NOT the whole query)
+    safe_name = name.replace("'", "''")
     data = qb_query(
         qb_tokens,
-        f"select Id, Name, AccountType, AccountSubType from Account where Name = '{name}'",
+        f"select Id, Name, AccountType, AccountSubType from Account where Name = '{safe_name}'",
     )
     return (data.get("QueryResponse", {}).get("Account") or [None])[0]
 
