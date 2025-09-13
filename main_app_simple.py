@@ -8,6 +8,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 import os
 
+from data_sync_script import get_company_qb_tokens
 from database_module import DatabaseManager
 from supporting_modules import CashFlowAgent, PlaidClient, QuickBooksClient, DeepSeekClient, AuthSystem
 
@@ -35,14 +36,14 @@ def init_session_state():
 
     if 'ai' not in st.session_state:
         st.session_state.ai = DeepSeekClient()
-    
+
     # Initialize QuickBooks token session state variables
     if 'access_token' not in st.session_state:
         st.session_state["access_token"] = None
-    
+
     if 'refresh_token' not in st.session_state:
         st.session_state["refresh_token"] = None
-    
+
     if 'realm_id' not in st.session_state:
         st.session_state["realm_id"] = None
 
@@ -202,8 +203,13 @@ def show_banking_page(user, agent):
 
         with col3:
             if st.button("🔄 Sync Data"):
-                sync_data(user['company_id'])
-                st.success("Data synced!")
+                rs = sync_data(user['company_id'])
+
+                if rs is None:
+                    st.warning(
+                        "QuickBooks not connected. Please connect first.")
+                else:
+                    st.success("Data synced!")
                 # st.rerun()
 
     # Account balances
@@ -240,7 +246,7 @@ def show_banking_page(user, agent):
                      use_container_width=True, hide_index=True)
 
 
-def show_cash_flow_page(user, agent:CashFlowAgent):
+def show_cash_flow_page(user, agent: CashFlowAgent):
     """Cash flow analysis"""
     st.header("💸 Cash Flow Analysis")
 
@@ -457,19 +463,26 @@ def sync_data(company_id):
     """Sync data from external APIs"""
     from data_sync_script import sync_plaid_data, sync_quickbooks_data
 
-    # Sync Plaid data
+    qb_token = get_company_qb_tokens(company_id)
+
+    if not qb_token:
+        return None
+
     try:
         sync_plaid_data(company_id)
         st.success("✅ Bank data synced")
     except Exception as e:
         st.warning(f"⚠️ Bank sync failed: {e}")
 
-    # Sync QuickBooks data
     try:
         sync_quickbooks_data(company_id)
         st.success("✅ Accounting data synced")
     except Exception as e:
         st.warning(f"⚠️ Accounting sync failed: {e}")
+        return
+
+        # Sync Plaid data
+
 
 def quickbooks_auth_handler():
     query_params = st.query_params
@@ -479,9 +492,11 @@ def quickbooks_auth_handler():
 
     if auth_code and realm_id:
         # Đổi code sang token
-        CLIENT_ID =os.getenv("QB_CLIENT_ID") or  st.secrets["QB_CLIENT_ID"] 
-        CLIENT_SECRET = os.getenv("QB_CLIENT_SECRET") or st.secrets["QB_CLIENT_SECRET"]
-        REDIRECT_URI = os.getenv("QB_CLIENT_REDIRECT_URL")  or  st.secrets["QB_CLIENT_REDIRECT_URL"]
+        CLIENT_ID = os.getenv("QB_CLIENT_ID") or st.secrets["QB_CLIENT_ID"]
+        CLIENT_SECRET = os.getenv(
+            "QB_CLIENT_SECRET") or st.secrets["QB_CLIENT_SECRET"]
+        REDIRECT_URI = os.getenv(
+            "QB_CLIENT_REDIRECT_URL") or st.secrets["QB_CLIENT_REDIRECT_URL"]
 
         token_url = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
         resp = requests.post(
