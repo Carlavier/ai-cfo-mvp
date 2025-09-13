@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Streamlit: main_app_simple",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "streamlit",
+      "args": ["run", "main_app_simple.py"],
+      "justMyCode": true,
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

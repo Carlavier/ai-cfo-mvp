@@ -183,7 +183,8 @@ def qb_create_invoice_from_txn(qb_tokens: Dict, txn: Dict) -> Optional[Dict]:
     note = f"PLD:{txn['transaction_id']}"
     if qb_find_invoice_by_privatenote(qb_tokens, note):
         return None  # already exists
-    customer = qb_ensure_customer(qb_tokens, txn.get("merchant_name") or "Customer")
+    customer = qb_ensure_customer(
+        qb_tokens, txn.get("merchant_name") or "Customer")
     item = qb_ensure_item_service(qb_tokens, "Services")
     amount = round(abs(float(txn["amount"])), 2)
     payload = {
@@ -213,7 +214,8 @@ def qb_create_bill_from_txn(qb_tokens: Dict, txn: Dict) -> Optional[Dict]:
     qb_acc_name, qb_acc_type, qb_acc_subtype = map_plaid_category_to_qb(
         (txn.get("category") or "").split(",")[0], False
     )
-    expense_acc = ensure_qb_account(qb_tokens, qb_acc_name, qb_acc_type, qb_acc_subtype)
+    expense_acc = ensure_qb_account(
+        qb_tokens, qb_acc_name, qb_acc_type, qb_acc_subtype)
     amount = round(abs(float(txn["amount"])), 2)
     payload = {
         "Line": [
@@ -315,7 +317,8 @@ class DataSyncManager:
             self.plaid_client = None
             return
 
-        client_id = os.getenv("PLAID_CLIENT_ID") or st.secrets["PLAID_CLIENT_ID"]
+        client_id = os.getenv(
+            "PLAID_CLIENT_ID") or st.secrets["PLAID_CLIENT_ID"]
         secret = os.getenv("PLAID_SECRET") or st.secrets["PLAID_SECRET"]
         # Normalize env and map to correct constants
         env_name = (
@@ -361,10 +364,12 @@ class DataSyncManager:
             return
 
         client_id = os.getenv("QB_CLIENT_ID") or st.secrets["QB_CLIENT_ID"]
-        secret = os.getenv("QB_CLIENT_SECRET") or st.secrets["QB_CLIENT_SECRET"]
+        secret = os.getenv(
+            "QB_CLIENT_SECRET") or st.secrets["QB_CLIENT_SECRET"]
         base_url = os.getenv("APP_BASE_URL") or st.secrets["APP_BASE_URL"]
         qb_redirect_uri = (
-            os.getenv("QB_CLIENT_REDIRECT_URL") or st.secrets["QB_CLIENT_REDIRECT_URL"]
+            os.getenv(
+                "QB_CLIENT_REDIRECT_URL") or st.secrets["QB_CLIENT_REDIRECT_URL"] or "http://localhost:8501/"
         )
 
         if not qb_redirect_uri:
@@ -432,7 +437,8 @@ def sync_plaid_data(company_id: int):
         print(f"🔄 Syncing Plaid data for company {company_id}...")
 
         # Sync accounts
-        accounts_synced = sync_plaid_accounts(sync_manager, company_id, access_token)
+        accounts_synced = sync_plaid_accounts(
+            sync_manager, company_id, access_token)
 
         # Sync transactions
         transactions_synced = sync_plaid_transactions(
@@ -488,7 +494,8 @@ def sync_plaid_accounts(
 
     # Handle both dict-like response and Plaid response objects
     accounts = (
-        response.get("accounts") if hasattr(response, "get") else response.accounts
+        response.get("accounts") if hasattr(
+            response, "get") else response.accounts
     )
 
     for account in accounts:
@@ -598,7 +605,8 @@ def sync_plaid_transactions(
             transaction_data = {
                 "account_id": local_account["id"],
                 "transaction_id": transaction.transaction_id,
-                "amount": -float(transaction.amount),  # Plaid uses positive for outflow
+                # Plaid uses positive for outflow
+                "amount": -float(transaction.amount),
                 "date": date_str,
                 "merchant_name": getattr(transaction, "merchant_name", None)
                 or getattr(transaction, "name", "Unknown"),
@@ -628,7 +636,8 @@ def sync_plaid_transactions(
                 "date": str(transaction["date"]),
                 "merchant_name": transaction.get("merchant_name", "Unknown"),
                 "category": (
-                    ",".join(transaction["category"]) if transaction["category"] else ""
+                    ",".join(transaction["category"]
+                             ) if transaction["category"] else ""
                 ),
                 "pending": bool(transaction["pending"]),
             }
@@ -745,7 +754,8 @@ def fetch_qb_data(endpoint: str, qb_tokens: Dict):
     if resp.status_code == 200:
         return resp.json()
     else:
-        raise Exception(f"QuickBooks API error {resp.status_code}: {resp.text}")
+        raise Exception(
+            f"QuickBooks API error {resp.status_code}: {resp.text}")
 
 
 # ------------------------- QuickBooks Batch JournalEntry -------------------------
@@ -807,13 +817,15 @@ def build_batch_journal_items(
         bank_name_bits = [local_acct.get("name") or "Bank"]
         if local_acct.get("mask"):
             bank_name_bits.append(f"({local_acct['mask']})")
-        bank_acc = ensure_qb_account(qb_tokens, " ".join(bank_name_bits), "Bank")
+        bank_acc = ensure_qb_account(
+            qb_tokens, " ".join(bank_name_bits), "Bank")
 
         is_income = float(t["amount"]) > 0
         qb_acc_name, qb_acc_type, qb_acc_subtype = map_plaid_category_to_qb(
             t.get("category", ""), is_income
         )
-        cat_acc = ensure_qb_account(qb_tokens, qb_acc_name, qb_acc_type, qb_acc_subtype)
+        cat_acc = ensure_qb_account(
+            qb_tokens, qb_acc_name, qb_acc_type, qb_acc_subtype)
 
         # Determine debit/credit sides
         if is_income:
@@ -872,10 +884,12 @@ def sync_qb_invoices(sync_manager, company_id: int, qb_tokens: Dict) -> int:
 
 def sync_qb_bills(sync_manager, company_id: int, qb_tokens: Dict) -> int:
     """Lấy và lưu bills từ QuickBooks"""
-    data = fetch_qb_data("query?query=select * from Bill", qb_tokens)
+    data = fetch_qb_data(
+        "query?query=select * from Bill", qb_tokens)
     bills = data.get("QueryResponse", {}).get("Bill", [])
+    filtered_bills = [b for b in bills if float(b.get("Balance", 0)) > 0]
     count = 0
-    for bill in bills:
+    for bill in filtered_bills:
         bill_data = {
             "company_id": company_id,
             "qb_bill_id": bill.get("Id"),
@@ -928,7 +942,8 @@ def sync_quickbooks_data(company_id: int) -> bool:
 
 
 def plaid_base_url() -> str:
-    env = (os.getenv("PLAID_ENV") or st.secrets["PLAID_ENV"] or "sandbox").lower()
+    env = (os.getenv("PLAID_ENV")
+           or st.secrets["PLAID_ENV"] or "sandbox").lower()
     return {
         "sandbox": "https://sandbox.plaid.com",
         "development": "https://development.plaid.com",
@@ -947,10 +962,11 @@ def get_company_plaid_token(company_id: int) -> str:
         )
         response = exchange_plaid_public_token()
         # Store the new tokens in database
-        db.set_plaid_tokens(company_id, response["access_token"], response["item_id"])
+        db.set_plaid_tokens(
+            company_id, response["access_token"], response["item_id"])
         print(f"✅ Stored new Plaid tokens for company {company_id}")
 
-        print(f"✅ Access Token { response["access_token"]}")
+        print(f"✅ Access Token {response["access_token"]}")
 
         return response["access_token"]
     return tokens.get("access_token") if tokens else None
@@ -976,7 +992,8 @@ def get_company_qb_tokens(company_id: int) -> Dict:
     # Nếu chưa có code thì chỉ hiển thị nút Connect
     CLIENT_ID = os.getenv("QB_CLIENT_ID") or st.secrets["QB_CLIENT_ID"]
     REDIRECT_URI = (
-        os.getenv("QB_CLIENT_REDIRECT_URL") or st.secrets["QB_CLIENT_REDIRECT_URL"]
+        os.getenv(
+            "QB_CLIENT_REDIRECT_URL") or st.secrets["QB_CLIENT_REDIRECT_URL"]
     )
     SCOPES = "com.intuit.quickbooks.accounting com.intuit.quickbooks.payment"
     STATE = "12345"
@@ -991,6 +1008,8 @@ def get_company_qb_tokens(company_id: int) -> Dict:
         }
     )
 
+    print(REDIRECT_URI)
+
     st.markdown(f"[🔗 Connect to QuickBooks]({auth_url})")
 
     return None
@@ -1002,7 +1021,8 @@ def create_sandbox_public_token(
     options: dict | None = None,
 ) -> str:
     """Create a sandbox public_token using Plaid's /sandbox/public_token/create."""
-    products = products or ["transactions"]  # include 'transactions' for tx sync
+    products = products or [
+        "transactions"]  # include 'transactions' for tx sync
     payload = {
         "client_id": os.getenv("PLAID_CLIENT_ID") or st.secrets["PLAID_CLIENT_ID"],
         "secret": os.getenv("PLAID_SECRET") or st.secrets["PLAID_SECRET"],
@@ -1017,7 +1037,7 @@ def create_sandbox_public_token(
     r.raise_for_status()
     data = r.json()
 
-    print(f"✅ Public  Token { data["public_token"]}")
+    print(f"✅ Public  Token {data["public_token"]}")
 
     return data["public_token"]
 
