@@ -997,28 +997,43 @@ def get_company_qb_tokens(company_id: int) -> Dict:
 
 
 def create_sandbox_public_token(
-    institution_id: str = "ins_3",
+    institution_id: str = "ins_109508",
     products: list[str] | None = None,
     options: dict | None = None,
+    override_username: str | None = "custom_sandbox_cfo",
+    override_password: str | None = "pass_good",
 ) -> str:
-    """Create a sandbox public_token using Plaid's /sandbox/public_token/create."""
-    products = products or ["transactions"]  # include 'transactions' for tx sync
+    """Create a sandbox public_token using Plaid's /sandbox/public_token/create.
+    This wrapper now supports the optional Plaid Sandbox overrides for a custom
+    username / password pair. These only apply in the Sandbox environment and
+    are useful when you want deterministic test data tied to a fake user.
+    """
+    products = products or ["transactions"]
+
     payload = {
         "client_id": os.getenv("PLAID_CLIENT_ID") or st.secrets["PLAID_CLIENT_ID"],
         "secret": os.getenv("PLAID_SECRET") or st.secrets["PLAID_SECRET"],
         "institution_id": institution_id,
         "initial_products": products,
     }
+
+    # Merge options safely
+    merged_options: dict = {}
     if options:
-        payload["options"] = options
+        merged_options.update(options)
+    if override_username:
+        merged_options["override_username"] = override_username
+    if override_password:
+        merged_options["override_password"] = override_password
+    if merged_options:
+        payload["options"] = merged_options
 
     url = f"{plaid_base_url()}/sandbox/public_token/create"
     r = requests.post(url, json=payload, timeout=30)
     r.raise_for_status()
     data = r.json()
 
-    print(f"✅ Public  Token { data["public_token"]}")
-
+    print(f"✅ Public Token {data['public_token']}")
     return data["public_token"]
 
 
