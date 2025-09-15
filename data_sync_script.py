@@ -364,7 +364,9 @@ class DataSyncManager:
         secret = os.getenv("QB_CLIENT_SECRET") or st.secrets["QB_CLIENT_SECRET"]
         base_url = os.getenv("APP_BASE_URL") or st.secrets["APP_BASE_URL"]
         qb_redirect_uri = (
-            os.getenv("QB_CLIENT_REDIRECT_URL") or st.secrets["QB_CLIENT_REDIRECT_URL"]
+            os.getenv("QB_CLIENT_REDIRECT_URL")
+            or st.secrets["QB_CLIENT_REDIRECT_URL"]
+            or "http://localhost:8501/"
         )
 
         if not qb_redirect_uri:
@@ -598,7 +600,8 @@ def sync_plaid_transactions(
             transaction_data = {
                 "account_id": local_account["id"],
                 "transaction_id": transaction.transaction_id,
-                "amount": -float(transaction.amount),  # Plaid uses positive for outflow
+                # Plaid uses positive for outflow
+                "amount": -float(transaction.amount),
                 "date": date_str,
                 "merchant_name": getattr(transaction, "merchant_name", None)
                 or getattr(transaction, "name", "Unknown"),
@@ -874,8 +877,9 @@ def sync_qb_bills(sync_manager, company_id: int, qb_tokens: Dict) -> int:
     """Lấy và lưu bills từ QuickBooks"""
     data = fetch_qb_data("query?query=select * from Bill", qb_tokens)
     bills = data.get("QueryResponse", {}).get("Bill", [])
+    filtered_bills = [b for b in bills if float(b.get("Balance", 0)) > 0]
     count = 0
-    for bill in bills:
+    for bill in filtered_bills:
         bill_data = {
             "company_id": company_id,
             "qb_bill_id": bill.get("Id"),
@@ -950,7 +954,7 @@ def get_company_plaid_token(company_id: int) -> str:
         db.set_plaid_tokens(company_id, response["access_token"], response["item_id"])
         print(f"✅ Stored new Plaid tokens for company {company_id}")
 
-        print(f"✅ Access Token { response["access_token"]}")
+        print(f"✅ Access Token {response["access_token"]}")
 
         return response["access_token"]
     return tokens.get("access_token") if tokens else None

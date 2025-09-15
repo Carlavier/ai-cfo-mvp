@@ -25,7 +25,6 @@ dist/
 *.temp
 
 # IDEs / editors
-.vscode/
 .idea/
 *.iml
 
